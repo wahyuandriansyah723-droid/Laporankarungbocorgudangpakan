@@ -1,0 +1,160 @@
+{
+  "entities": {
+    "WarehouseSettings": {
+      "title": "WarehouseSettings",
+      "description": "Configuration settings for the warehouse",
+      "type": "object",
+      "properties": {
+        "beratPerKarungKg": {
+          "type": "number",
+          "description": "Standard weight per sack in kilograms"
+        },
+        "targetToleransiPersen": {
+          "type": "number",
+          "description": "Target tolerance ratio percentage"
+        },
+        "namaGudang": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Name of the warehouse"
+        }
+      },
+      "required": ["beratPerKarungKg", "targetToleransiPersen", "namaGudang"]
+    },
+    "MonthReport": {
+      "title": "MonthReport",
+      "description": "Monthly summary report of bag leakage",
+      "type": "object",
+      "properties": {
+        "monthIndex": {
+          "type": "number",
+          "description": "Index of the month (1-12)"
+        },
+        "monthName": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Name of the month"
+        },
+        "penjualanKg": {
+          "type": "number",
+          "description": "Total sales in kg for the month"
+        },
+        "dailyEntries": {
+          "type": "object",
+          "description": "Map of day index to daily entry"
+        }
+      },
+      "required": ["monthIndex", "monthName", "penjualanKg", "dailyEntries"]
+    },
+    "PetugasReport": {
+      "title": "PetugasReport",
+      "description": "Detailed shift and item leakage report created by operators",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique identifier"
+        },
+        "tanggalStr": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Date string"
+        },
+        "hari": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Day name in Indonesian"
+        },
+        "tanggalFormatted": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Formatted date"
+        },
+        "shift": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Shift description"
+        },
+        "dibuatOleh": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Creator name"
+        },
+        "disetujuiOleh": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Approver name"
+        },
+        "statusApproval": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Approval status"
+        }
+      },
+      "required": ["id", "tanggalStr", "dibuatOleh", "statusApproval"]
+    },
+    "LeakageRecord": {
+      "title": "LeakageRecord",
+      "description": "Log entry of a bag leakage event",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Log record ID"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Date YYYY-MM-DD"
+        },
+        "monthIndex": {
+          "type": "number",
+          "description": "Month index"
+        },
+        "day": {
+          "type": "number",
+          "description": "Day number"
+        },
+        "forklift": {
+          "type": "number",
+          "description": "Forklift leakage count"
+        },
+        "pallet": {
+          "type": "number",
+          "description": "Pallet leakage count"
+        },
+        "bocorProduksi": {
+          "type": "number",
+          "description": "Production leakage count"
+        },
+        "totalBocor": {
+          "type": "number",
+          "description": "Total count"
+        }
+      },
+      "required": ["id", "date", "monthIndex", "day", "totalBocor"]
+    }
+  },
+  "firestore": {
+    "/warehouse_settings/{docId}": {
+      "schema": "WarehouseSettings",
+      "description": "Warehouse global configuration settings"
+    },
+    "/monthly_reports/{monthId}": {
+      "schema": "MonthReport",
+      "description": "Annual 12-month reports partition"
+    },
+    "/petugas_reports/{reportId}": {
+      "schema": "PetugasReport",
+      "description": "Daily operational leakage reports by warehouse operators"
+    },
+    "/leakage_logs/{logId}": {
+      "schema": "LeakageRecord",
+      "description": "Audit and historical leakage logs"
+    }
+  }
+}

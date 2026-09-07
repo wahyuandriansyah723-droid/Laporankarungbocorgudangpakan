@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .shadow-sm, .shadow-md, .shadow-lg {
+    box-shadow: none !important;
+  }
+
+  table {
+    page-break-inside: avoid;
+    font-size: 9px !important;
+  }
+
+  th, td {
+    padding: 2px 4px !important;
+  }
+}

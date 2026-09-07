@@ -1,0 +1,6 @@
+{
+  "name": "Laporan Karung Bocor Gudang",
+  "description": "Sistem Laporan & Rekapitulasi Data Karung Bocor Gudang Jadi",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

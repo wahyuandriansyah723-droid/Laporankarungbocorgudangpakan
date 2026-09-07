@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Validation for Warehouse Settings
+    function isValidWarehouseSettings(data) {
+      return data.beratPerKarungKg is number &&
+             data.beratPerKarungKg > 0 &&
+             data.targetToleransiPersen is number &&
+             data.namaGudang is string &&
+             data.namaGudang.size() <= 150;
+    }
+
+    // Validation for Monthly Report
+    function isValidMonthReport(data) {
+      return data.monthIndex is number &&
+             data.monthIndex >= 1 &&
+             data.monthIndex <= 12 &&
+             data.monthName is string &&
+             data.monthName.size() <= 50 &&
+             data.penjualanKg is number &&
+             data.dailyEntries is map;
+    }
+
+    // Validation for Petugas Report
+    function isValidPetugasReport(data) {
+      return isValidId(data.id) &&
+             data.tanggalStr is string &&
+             data.tanggalStr.size() <= 30 &&
+             data.dibuatOleh is string &&
+             data.dibuatOleh.size() <= 100 &&
+             data.statusApproval is string &&
+             data.statusApproval.size() <= 30;
+    }
+
+    // Validation for Leakage Log
+    function isValidLeakageRecord(data) {
+      return isValidId(data.id) &&
+             data.date is string &&
+             data.date.size() <= 30 &&
+             data.monthIndex is number &&
+             data.day is number &&
+             data.totalBocor is number;
+    }
+
+    // Rules for warehouse_settings
+    match /warehouse_settings/{docId} {
+      allow read: if true;
+      allow write: if isValidId(docId) && isValidWarehouseSettings(incoming());
+    }
+
+    // Rules for monthly_reports
+    match /monthly_reports/{monthId} {
+      allow read: if true;
+      allow create, update: if isValidId(monthId) && isValidMonthReport(incoming());
+      allow delete: if false; // Data preservation
+    }
+
+    // Rules for petugas_reports
+    match /petugas_reports/{reportId} {
+      allow read: if true;
+      allow create, update: if isValidId(reportId) && isValidPetugasReport(incoming());
+      allow delete: if isValidId(reportId);
+    }
+
+    // Rules for leakage_logs
+    match /leakage_logs/{logId} {
+      allow read: if true;
+      allow create, update: if isValidId(logId) && isValidLeakageRecord(incoming());
+      allow delete: if isValidId(logId);
+    }
+  }
+}
