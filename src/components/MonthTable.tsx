@@ -12,6 +12,7 @@ import { Edit3, Calendar, Check, X, AlertTriangle, Trash2, RotateCcw, Save, Slid
 interface MonthTableProps {
   report: MonthReport;
   settings: WarehouseSettings;
+  highlightedDay?: { monthIndex: number; day: number } | null;
   onUpdateEntry: (monthIndex: number, day: number, field: 'forklift' | 'pallet' | 'bocorProduksi', value: number) => void;
   onUpdatePenjualanKg: (monthIndex: number, newPenjualanKg: number) => void;
   onToggleCellStatus: (monthIndex: number, day: number, statusType: 'red' | 'yellow' | 'normal') => void;
@@ -25,6 +26,7 @@ interface MonthTableProps {
 export const MonthTable: React.FC<MonthTableProps> = ({
   report,
   settings,
+  highlightedDay,
   onUpdateEntry,
   onUpdatePenjualanKg,
   onToggleCellStatus,
@@ -38,6 +40,18 @@ export const MonthTable: React.FC<MonthTableProps> = ({
   const maxDays = getDaysInMonth(year, report.monthIndex);
   const totals = calculateMonthTotals(report, settings);
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
+
+  // Memoize days that have inputted data (> 0)
+  const daysWithData = React.useMemo(() => {
+    return days.filter((d) => {
+      if (d > maxDays) return false;
+      const entry = report.dailyEntries[d];
+      return (entry?.forklift || 0) + (entry?.pallet || 0) + (entry?.bocorProduksi || 0) > 0;
+    });
+  }, [report.dailyEntries, maxDays]);
+
+  const [onlyShowDaysWithData, setOnlyShowDaysWithData] = useState(false);
+  const renderedDays = onlyShowDaysWithData ? (daysWithData.length > 0 ? daysWithData : days) : days;
 
   // Saving state for this month report
   const [isSaving, setIsSaving] = useState(false);
@@ -167,23 +181,52 @@ export const MonthTable: React.FC<MonthTableProps> = ({
   const isExceedingTarget = totals.rasioBocorPersen > settings.targetToleransiPersen;
 
   return (
-    <div className="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden mb-8 transition-all hover:shadow-md">
+    <div
+      id={`month-table-${report.monthIndex}`}
+      className="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden mb-8 transition-all hover:shadow-md"
+    >
       {/* Month Header Banner - Yellow background matching image */}
       <div className="bg-amber-400 text-slate-900 font-bold px-4 py-2.5 text-center text-sm md:text-base tracking-wider uppercase border-b border-amber-500 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Calendar className="w-4 h-4 text-slate-800" />
           <span className="font-extrabold">{report.monthName} 2026</span>
           <span className="text-[10px] font-bold bg-amber-200/90 text-slate-800 px-2 py-0.5 rounded-full border border-amber-500/40">
             {maxDays} Hari Kalender
           </span>
+          {daysWithData.length > 0 ? (
+            <span className="text-[10px] font-black bg-emerald-700 text-white px-2.5 py-0.5 rounded-full shadow-2xs flex items-center gap-1">
+              <Check className="w-3 h-3 text-white" />
+              <span>{daysWithData.length} Hari Terinput ({formatNumberIndonesian(totals.totalBocor)} Krg)</span>
+            </span>
+          ) : (
+            <span className="text-[10px] font-medium bg-amber-200/70 text-slate-700 px-2 py-0.5 rounded-full border border-amber-300">
+              0 Hari Terinput
+            </span>
+          )}
         </div>
 
-        <div className="text-xs font-normal text-slate-800 hidden md:block">
-          * Klik sel untuk edit cepat | Gunakan tombol <span className="font-bold border border-slate-700 px-1 py-0.2 rounded bg-amber-200">Aksi Harian</span> untuk edit/hapus
+        <div className="text-xs font-normal text-slate-800 hidden lg:block">
+          * Klik sel untuk edit cepat | Angka terisi ditandai warna tebal
         </div>
 
         {/* Action Controls for the Entire Month */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {daysWithData.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setOnlyShowDaysWithData(!onlyShowDaysWithData)}
+              className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded transition-all cursor-pointer border ${
+                onlyShowDaysWithData
+                  ? 'bg-emerald-800 text-white border-emerald-900 shadow-2xs ring-2 ring-white/50'
+                  : 'bg-white hover:bg-amber-100 text-slate-900 border-amber-600 shadow-2xs'
+              }`}
+              title={onlyShowDaysWithData ? 'Tampilkan kembali semua 31 kolom tanggal' : 'Sembunyikan tanggal kosong, hanya tampilkan tanggal yang sudah diisi'}
+            >
+              <Sliders className="w-3 h-3" />
+              <span>{onlyShowDaysWithData ? 'Semua Tanggal (1-31)' : `Fokus Terisi (${daysWithData.length})`}</span>
+            </button>
+          )}
+
           {/* Tombol Simpan Bulan Ini */}
           <button
             onClick={handleSaveMonth}
@@ -247,7 +290,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
               <th className="p-1.5 border-r border-slate-300 text-left w-36 bg-slate-200 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                 TANGGAL
               </th>
-              {days.map((d) => {
+              {renderedDays.map((d) => {
                 const isOutOfMonth = d > maxDays;
                 if (isOutOfMonth) {
                   return (
@@ -270,16 +313,27 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                 const entry = report.dailyEntries[d];
                 const isRed = entry?.isRedDay !== undefined ? entry.isRedDay : (isSunday || isHoliday);
                 const isYellow = entry?.isYellowDay;
-                const hasData = (entry?.forklift || 0) + (entry?.pallet || 0) + (entry?.bocorProduksi || 0) > 0;
+                const dayTotal = (entry?.forklift || 0) + (entry?.pallet || 0) + (entry?.bocorProduksi || 0);
+                const hasData = dayTotal > 0;
+                const isHighlighted = highlightedDay?.monthIndex === report.monthIndex && highlightedDay?.day === d;
 
                 return (
                   <th
                     key={d}
+                    id={`cell-day-${report.monthIndex}-${d}`}
                     onClick={() => handleOpenDayModal(d)}
-                    className={`p-1 border-r border-slate-300 text-center min-w-[32px] max-w-[36px] transition-colors cursor-pointer hover:brightness-95 ${
-                      isRed ? 'bg-red-600 text-white font-black shadow-inner' : isYellow ? 'bg-amber-300 text-slate-900 font-bold' : hasData ? 'bg-blue-50/80 font-bold text-slate-900' : 'bg-slate-100 text-slate-700'
+                    className={`p-1 border-r border-slate-300 text-center min-w-[34px] max-w-[40px] transition-all cursor-pointer hover:brightness-95 ${
+                      isHighlighted
+                        ? 'ring-4 ring-blue-600 ring-inset bg-blue-100 font-black animate-pulse z-20 shadow-md'
+                        : isRed
+                        ? 'bg-red-600 text-white font-black shadow-inner'
+                        : isYellow
+                        ? 'bg-amber-300 text-slate-900 font-bold'
+                        : hasData
+                        ? 'bg-emerald-50/90 font-bold text-slate-900 border-t-2 border-t-emerald-600'
+                        : 'bg-slate-100 text-slate-700'
                     }`}
-                    title={`Klik untuk Edit/Hapus Tanggal ${d} (${dayName}) - ${isRed ? 'Hari Libur / Minggu' : 'Hari Kerja'}`}
+                    title={`Klik untuk Edit/Hapus Tanggal ${d} (${dayName}) - ${hasData ? `Sudah Terinput: ${dayTotal} Krg` : 'Kosong'}`}
                   >
                     <div className="flex flex-col items-center justify-center">
                       <span className={`text-[8px] font-bold uppercase tracking-tight leading-none ${isRed ? 'text-red-100' : 'text-slate-500'}`}>
@@ -289,6 +343,11 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                       {isRed && (
                         <span className="text-[7px] leading-none font-black text-red-100 uppercase tracking-tighter mt-0.5">
                           OFF
+                        </span>
+                      )}
+                      {hasData && (
+                        <span className="text-[7px] leading-none font-black text-emerald-800 bg-emerald-200/90 px-1 py-0.2 rounded-full border border-emerald-400 mt-0.5 whitespace-nowrap shadow-2xs">
+                          {dayTotal}k
                         </span>
                       )}
                     </div>
@@ -308,7 +367,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
               <td className="p-1 border-r border-slate-300 font-extrabold text-[10px] uppercase text-slate-700 bg-slate-300/80 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-center">
                 AKSI HARIAN
               </td>
-              {days.map((d) => {
+              {renderedDays.map((d) => {
                 const isOutOfMonth = d > maxDays;
                 if (isOutOfMonth) {
                   return (
@@ -364,7 +423,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
               <td className="p-1.5 border-r border-slate-300 font-medium text-slate-800 bg-slate-50 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                 FORKLIFT
               </td>
-              {days.map((d) => {
+              {renderedDays.map((d) => {
                 const isOutOfMonth = d > maxDays;
                 if (isOutOfMonth) {
                   return (
@@ -381,6 +440,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                 const isRed = entry?.isRedDay !== undefined ? entry.isRedDay : (isSunday || isHoliday);
                 const isYellow = entry?.isYellowDay;
                 const isEditing = editingCell?.day === d && editingCell?.field === 'forklift';
+                const isHighlighted = highlightedDay?.monthIndex === report.monthIndex && highlightedDay?.day === d;
 
                 return (
                   <td
@@ -392,12 +452,14 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                       onToggleCellStatus(report.monthIndex, d, nextStatus);
                     }}
                     className={`p-1 border-r border-slate-200 text-center cursor-pointer transition-colors ${
-                      isRed
+                      isHighlighted
+                        ? 'ring-2 ring-blue-500 bg-blue-100/90 font-black'
+                        : isRed
                         ? 'bg-red-500 text-white font-semibold'
                         : isYellow
                         ? 'bg-amber-200 text-slate-900 font-semibold'
                         : val && val > 0
-                        ? 'text-slate-800 hover:bg-blue-50 font-medium'
+                        ? 'text-slate-900 bg-blue-50/70 hover:bg-blue-100/80 font-bold'
                         : 'text-slate-300 hover:bg-slate-100'
                     }`}
                   >
@@ -412,7 +474,11 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                         className="w-full h-full text-center bg-white text-slate-900 border border-blue-500 rounded outline-none text-xs p-0"
                       />
                     ) : (
-                      val && val > 0 ? val : ''
+                      val && val > 0 ? (
+                        <span className={`inline-block font-extrabold ${isRed ? 'text-white' : 'text-blue-950 font-black'}`}>
+                          {val}
+                        </span>
+                      ) : ''
                     )}
                   </td>
                 );
@@ -454,7 +520,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
               <td className="p-1.5 border-r border-slate-300 font-medium text-slate-800 bg-slate-50 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                 PALLET
               </td>
-              {days.map((d) => {
+              {renderedDays.map((d) => {
                 const isOutOfMonth = d > maxDays;
                 if (isOutOfMonth) {
                   return (
@@ -471,6 +537,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                 const isRed = entry?.isRedDay !== undefined ? entry.isRedDay : (isSunday || isHoliday);
                 const isYellow = entry?.isYellowDay;
                 const isEditing = editingCell?.day === d && editingCell?.field === 'pallet';
+                const isHighlighted = highlightedDay?.monthIndex === report.monthIndex && highlightedDay?.day === d;
 
                 return (
                   <td
@@ -482,12 +549,14 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                       onToggleCellStatus(report.monthIndex, d, nextStatus);
                     }}
                     className={`p-1 border-r border-slate-200 text-center cursor-pointer transition-colors ${
-                      isRed
+                      isHighlighted
+                        ? 'ring-2 ring-blue-500 bg-blue-100/90 font-black'
+                        : isRed
                         ? 'bg-red-500 text-white font-semibold'
                         : isYellow
                         ? 'bg-amber-200 text-slate-900 font-semibold'
                         : val && val > 0
-                        ? 'text-slate-800 hover:bg-blue-50 font-medium'
+                        ? 'text-slate-900 bg-blue-50/70 hover:bg-blue-100/80 font-bold'
                         : 'text-slate-300 hover:bg-slate-100'
                     }`}
                   >
@@ -502,7 +571,11 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                         className="w-full h-full text-center bg-white text-slate-900 border border-blue-500 rounded outline-none text-xs p-0"
                       />
                     ) : (
-                      val && val > 0 ? val : ''
+                      val && val > 0 ? (
+                        <span className={`inline-block font-extrabold ${isRed ? 'text-white' : 'text-blue-950 font-black'}`}>
+                          {val}
+                        </span>
+                      ) : ''
                     )}
                   </td>
                 );
@@ -524,7 +597,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
               <td className="p-1.5 border-r border-slate-300 font-medium text-slate-800 bg-slate-50 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                 BOCOR PRODUKSI
               </td>
-              {days.map((d) => {
+              {renderedDays.map((d) => {
                 const isOutOfMonth = d > maxDays;
                 if (isOutOfMonth) {
                   return (
@@ -541,6 +614,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                 const isRed = entry?.isRedDay !== undefined ? entry.isRedDay : (isSunday || isHoliday);
                 const isYellow = entry?.isYellowDay;
                 const isEditing = editingCell?.day === d && editingCell?.field === 'bocorProduksi';
+                const isHighlighted = highlightedDay?.monthIndex === report.monthIndex && highlightedDay?.day === d;
 
                 return (
                   <td
@@ -552,12 +626,14 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                       onToggleCellStatus(report.monthIndex, d, nextStatus);
                     }}
                     className={`p-1 border-r border-slate-200 text-center cursor-pointer transition-colors ${
-                      isRed
+                      isHighlighted
+                        ? 'ring-2 ring-blue-500 bg-blue-100/90 font-black'
+                        : isRed
                         ? 'bg-red-500 text-white font-semibold'
                         : isYellow
                         ? 'bg-amber-200 text-slate-900 font-semibold'
                         : val && val > 0
-                        ? 'text-slate-800 hover:bg-blue-50 font-medium'
+                        ? 'text-slate-900 bg-blue-50/70 hover:bg-blue-100/80 font-bold'
                         : 'text-slate-300 hover:bg-slate-100'
                     }`}
                   >
@@ -572,7 +648,11 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                         className="w-full h-full text-center bg-white text-slate-900 border border-blue-500 rounded outline-none text-xs p-0"
                       />
                     ) : (
-                      val && val > 0 ? val : ''
+                      val && val > 0 ? (
+                        <span className={`inline-block font-extrabold ${isRed ? 'text-white' : 'text-blue-950 font-black'}`}>
+                          {val}
+                        </span>
+                      ) : ''
                     )}
                   </td>
                 );
@@ -601,7 +681,7 @@ export const MonthTable: React.FC<MonthTableProps> = ({
               <td className="p-1.5 border-r border-slate-300 bg-slate-200 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                 TOTAL BOCOR
               </td>
-              {days.map((d) => {
+              {renderedDays.map((d) => {
                 const isOutOfMonth = d > maxDays;
                 if (isOutOfMonth) {
                   return (
@@ -617,23 +697,30 @@ export const MonthTable: React.FC<MonthTableProps> = ({
                 const isHoliday = isIndonesianRedDay(year, report.monthIndex, d);
                 const isRed = entry?.isRedDay !== undefined ? entry.isRedDay : (isSunday || isHoliday);
                 const isYellow = entry?.isYellowDay;
+                const isHighlighted = highlightedDay?.monthIndex === report.monthIndex && highlightedDay?.day === d;
 
                 return (
                   <td
                     key={d}
                     onClick={() => handleOpenDayModal(d)}
                     className={`p-1 border-r border-slate-300 text-center font-bold cursor-pointer hover:brightness-95 ${
-                      isRed
+                      isHighlighted
+                        ? 'ring-2 ring-blue-600 bg-blue-100 text-blue-950 font-black'
+                        : isRed
                         ? 'bg-red-500 text-white'
                         : isYellow
                         ? 'bg-amber-300 text-slate-900'
                         : sum > 0
-                        ? 'bg-amber-50 text-slate-900'
+                        ? 'bg-amber-100 text-amber-950 font-black border border-amber-300'
                         : 'text-slate-400'
                     }`}
                     title={`Klik untuk Edit Data Tanggal ${d}`}
                   >
-                    {sum > 0 ? sum : ''}
+                    {sum > 0 ? (
+                      <span className="inline-block px-1 rounded bg-amber-200/80 text-slate-950 font-black">
+                        {sum}
+                      </span>
+                    ) : ''}
                   </td>
                 );
               })}
