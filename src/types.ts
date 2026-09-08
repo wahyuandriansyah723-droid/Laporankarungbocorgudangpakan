@@ -73,6 +73,8 @@ export interface PetugasReport {
 }
 
 export interface WarehouseSettings {
+  namaSistem?: string; // e.g. "LAPORAN KARUNG BOCOR" (Customizable system title)
+  subNamaSistem?: string; // e.g. "GUDANG JADI (GBJ)" (Sub-title / unit badge)
   beratPerKarungKg: number; // Default 50 kg
   targetToleransiPersen: number; // Default 0.25%
   namaGudang: string; // e.g. "Gudang Jadi - Line A"

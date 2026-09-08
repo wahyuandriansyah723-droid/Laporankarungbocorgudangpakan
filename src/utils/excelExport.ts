@@ -20,7 +20,8 @@ export function exportReportsToExcel(
   const holidays = customHolidays || loadStoredHolidays();
 
   // Title row
-  rows.push(['LAPORAN DATA KARUNG BOCOR - GUDANG JADI TAHUN 2026']);
+  const systemTitle = settings.namaSistem ? settings.namaSistem.toUpperCase() : 'LAPORAN DATA KARUNG BOCOR';
+  rows.push([`${systemTitle} - GUDANG JADI TAHUN 2026`]);
   rows.push([`Unit Gudang: ${settings.namaGudang} | Standar Kemasan: ${settings.beratPerKarungKg} Kg/Karung | Target Toleransi: ${settings.targetToleransiPersen}%`]);
   rows.push([`Periode: 01 Januari 2026 s/d 31 Desember 2026 | Tanggal Export: ${new Date().toLocaleDateString('id-ID', { dateStyle: 'full' })}`]);
   rows.push([]);

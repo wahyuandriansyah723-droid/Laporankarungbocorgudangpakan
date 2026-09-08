@@ -100,6 +100,15 @@ export default function App() {
     };
   }, []);
 
+  // Synchronize document.title dynamically when system name or warehouse changes
+  useEffect(() => {
+    if (settings.namaSistem) {
+      document.title = `${settings.namaSistem} - ${settings.namaGudang}`;
+    } else {
+      document.title = `Sistem Karung Bocor - ${settings.namaGudang}`;
+    }
+  }, [settings.namaSistem, settings.namaGudang]);
+
   // Handler: update cell entry (Optimistic update + targeted single month debounced write)
   const handleUpdateEntry = (
     monthIndex: number,

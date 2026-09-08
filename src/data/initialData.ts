@@ -54,6 +54,8 @@ export function createEmptyMonthReports(): MonthReport[] {
 export const emptyMonthReports = createEmptyMonthReports();
 
 export const defaultSettings: WarehouseSettings = {
+  namaSistem: 'LAPORAN KARUNG BOCOR',
+  subNamaSistem: 'GUDANG JADI (GBJ)',
   beratPerKarungKg: 50,
   targetToleransiPersen: 0.25,
   namaGudang: 'Gudang Jadi Utama - Divisi Packaging',

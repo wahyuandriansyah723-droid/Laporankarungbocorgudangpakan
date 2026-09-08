@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, PlusCircle, BarChart3, ListFilter, Settings, FileSpreadsheet, Printer, RotateCcw, PackageCheck, AlertCircle, ClipboardList, Activity } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, BarChart3, ListFilter, Settings, FileSpreadsheet, Printer, RotateCcw, PackageCheck, AlertCircle, ClipboardList, Activity, Edit3 } from 'lucide-react';
 import { MonthReport, WarehouseSettings } from '../types';
 import { calculateMonthTotals, formatNumberIndonesian } from '../utils/calculations';
 import { ConnectionStatusBadge } from './ConnectionStatusBadge';
@@ -55,13 +55,27 @@ export const Navbar: React.FC<NavbarProps> = ({
               <PackageCheck className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 uppercase">
-                  LAPORAN KARUNG BOCOR
+              <div className="flex items-center gap-2 group">
+                <h1
+                  onClick={() => setActiveTab('settings')}
+                  className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 uppercase cursor-pointer hover:text-blue-700 transition-colors"
+                  title="Klik untuk ubah nama sistem di Pengaturan"
+                >
+                  {settings.namaSistem !== undefined ? (settings.namaSistem || '(Tanpa Nama Sistem)') : 'LAPORAN KARUNG BOCOR'}
                 </h1>
-                <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded border border-slate-200 uppercase tracking-wider">
-                  GUDANG JADI (GBJ)
-                </span>
+                {settings.subNamaSistem ? (
+                  <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded border border-slate-200 uppercase tracking-wider">
+                    {settings.subNamaSistem}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('settings')}
+                  className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-800 transition-opacity p-1 rounded hover:bg-slate-100 cursor-pointer"
+                  title="Edit Nama Sistem di Pengaturan"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
                 {settings.namaGudang} &bull; Standar: <span className="text-slate-800 font-semibold">{settings.beratPerKarungKg} Kg/Karung</span>
