@@ -1,4 +1,10 @@
-import { MonthReport, WarehouseSettings } from '../types';
+import {
+  MonthReport,
+  WarehouseSettings,
+  TanggalLaporanSettings,
+  PenanggungJawabLaporan,
+  PenanggungJawabProfile,
+} from '../types';
 
 export function isIndonesianRedDay(year: number, monthIndex: number, day: number): boolean {
   // monthIndex is 1..12
@@ -53,12 +59,46 @@ export function createEmptyMonthReports(): MonthReport[] {
 
 export const emptyMonthReports = createEmptyMonthReports();
 
+export const defaultTanggalSettings: TanggalLaporanSettings = {
+  mode: 'custom',
+  tanggalCustom: '2026-07-18',
+  formatTanggal: 'DD.MM.YYYY',
+  kotaPengesahan: 'Sidoarjo',
+  tahunLaporan: 2026,
+};
+
+export const defaultPenanggungJawab: PenanggungJawabLaporan = {
+  dibuatOleh: 'Petugas FG WH',
+  jabatanDibuat: 'FG WH Worker',
+  nikDibuat: 'WH-0492',
+
+  disetujuiOleh: 'AMIN SODIK',
+  jabatanDisetujui: 'FG WH Supervisor',
+  nikDisetujui: 'SPV-0118',
+
+  diketahuiOleh: 'HERY SHAPRIANTO',
+  jabatanDiketahui: 'Head of WH Subdept',
+  nikDiketahui: 'HOD-0023',
+};
+
+export const defaultProfilPenanggungJawab: PenanggungJawabProfile[] = [
+  { id: '1', nama: 'Petugas FG WH', jabatan: 'FG WH Worker', peran: 'dibuat', nik: 'WH-0492', divisi: 'Gudang Jadi' },
+  { id: '2', nama: 'Budi Santoso', jabatan: 'Operator Forklift & Gudang', peran: 'dibuat', nik: 'OP-0231', divisi: 'Gudang Jadi' },
+  { id: '3', nama: 'AMIN SODIK', jabatan: 'FG WH Supervisor', peran: 'disetujui', nik: 'SPV-0118', divisi: 'Logistik & WH' },
+  { id: '4', nama: 'Wahyu Andriansyah', jabatan: 'Supervisor Operasional GBJ', peran: 'disetujui', nik: 'SPV-0125', divisi: 'Logistik & WH' },
+  { id: '5', nama: 'HERY SHAPRIANTO', jabatan: 'Head of WH Subdept', peran: 'diketahui', nik: 'HOD-0023', divisi: 'Warehouse Dept' },
+  { id: '6', nama: 'Drs. Bambang Irawan', jabatan: 'Plant Manager / Kepala Pabrik', peran: 'diketahui', nik: 'MGR-0005', divisi: 'Management' },
+];
+
 export const defaultSettings: WarehouseSettings = {
   namaSistem: 'LAPORAN KARUNG BOCOR',
   subNamaSistem: 'GUDANG JADI (GBJ)',
   beratPerKarungKg: 50,
   targetToleransiPersen: 0.25,
   namaGudang: 'Gudang Jadi Utama - Divisi Packaging',
+  pengaturanTanggal: defaultTanggalSettings,
+  penanggungJawab: defaultPenanggungJawab,
+  daftarProfilPenanggungJawab: defaultProfilPenanggungJawab,
 };
 
 export const initialMonthReports: MonthReport[] = [

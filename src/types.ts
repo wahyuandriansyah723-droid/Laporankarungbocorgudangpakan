@@ -72,10 +72,46 @@ export interface PetugasReport {
   createdAt: string;
 }
 
+export interface PenanggungJawabProfile {
+  id: string;
+  nama: string;
+  jabatan: string; // e.g. "FG WH Worker", "FG WH Supervisor", "Head of WH Subdept"
+  peran: 'dibuat' | 'disetujui' | 'diketahui' | 'umum';
+  nik?: string; // NIP/NIK karyawan
+  divisi?: string; // Bagian / Dept
+}
+
+export interface TanggalLaporanSettings {
+  mode: 'realtime' | 'custom'; // Realtime (hari ini) atau tanggal khusus yang ditentukan
+  tanggalCustom?: string; // YYYY-MM-DD (e.g. 2026-07-18)
+  formatTanggal: 'DD.MM.YYYY' | 'DD/MM/YYYY' | 'DD MMMM YYYY' | 'YYYY-MM-DD';
+  kotaPengesahan: string; // e.g. "Sidoarjo", "Surabaya", "Jakarta"
+  tahunLaporan: number; // e.g. 2026
+}
+
+export interface PenanggungJawabLaporan {
+  dibuatOleh: string;
+  jabatanDibuat: string;
+  nikDibuat?: string;
+
+  disetujuiOleh: string;
+  jabatanDisetujui: string;
+  nikDisetujui?: string;
+
+  diketahuiOleh: string;
+  jabatanDiketahui: string;
+  nikDiketahui?: string;
+}
+
 export interface WarehouseSettings {
   namaSistem?: string; // e.g. "LAPORAN KARUNG BOCOR" (Customizable system title)
   subNamaSistem?: string; // e.g. "GUDANG JADI (GBJ)" (Sub-title / unit badge)
   beratPerKarungKg: number; // Default 50 kg
   targetToleransiPersen: number; // Default 0.25%
   namaGudang: string; // e.g. "Gudang Jadi - Line A"
+
+  // Pengaturan Tanggal & Penanggung Jawab Laporan
+  pengaturanTanggal?: TanggalLaporanSettings;
+  penanggungJawab?: PenanggungJawabLaporan;
+  daftarProfilPenanggungJawab?: PenanggungJawabProfile[];
 }

@@ -99,10 +99,73 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
   ];
 
-  // Preset choices for signatures
-  const workerPresets = ['Petugas FG WH', 'Hardi (Worker)', 'Budi (Worker)', 'Slamet (Worker)', 'Ahmad (Worker)', 'Wahyu (Worker)'];
-  const supervisorPresets = ['AMIN SODIK (FG WH Supervisor)', 'AMIN SODIK', 'BAMBANG S. (FG WH Supervisor)', 'AGUS TRIONO (FG WH Supervisor)'];
-  const headPresets = ['HERY SHAPRIANTO (Head of WH Subdept)', 'HERY SHAPRIANTO', 'ANTONIUS (Head of WH Subdept)', 'EKO PURWANTO (Head of WH Subdept)'];
+  // Preset choices for signatures (populated from settings & defaults)
+  const workerPresets = Array.from(
+    new Set([
+      settings.penanggungJawab?.dibuatOleh,
+      ...(settings.daftarProfilPenanggungJawab
+        ?.filter((p) => p.peran === 'dibuat' || p.peran === 'umum')
+        .map((p) => p.nama) || []),
+      'Petugas FG WH',
+      'Hardi (Worker)',
+      'Budi (Worker)',
+      'Slamet (Worker)',
+      'Ahmad (Worker)',
+      'Wahyu (Worker)',
+    ])
+  ).filter(Boolean) as string[];
+
+  const supervisorPresets = Array.from(
+    new Set([
+      settings.penanggungJawab?.disetujuiOleh,
+      ...(settings.daftarProfilPenanggungJawab
+        ?.filter((p) => p.peran === 'disetujui' || p.peran === 'umum')
+        .map((p) => p.nama) || []),
+      'AMIN SODIK (FG WH Supervisor)',
+      'AMIN SODIK',
+      'BAMBANG S. (FG WH Supervisor)',
+      'AGUS TRIONO (FG WH Supervisor)',
+    ])
+  ).filter(Boolean) as string[];
+
+  const headPresets = Array.from(
+    new Set([
+      settings.penanggungJawab?.diketahuiOleh,
+      ...(settings.daftarProfilPenanggungJawab
+        ?.filter((p) => p.peran === 'diketahui' || p.peran === 'umum')
+        .map((p) => p.nama) || []),
+      'HERY SHAPRIANTO (Head of WH Subdept)',
+      'HERY SHAPRIANTO',
+      'ANTONIUS (Head of WH Subdept)',
+      'EKO PURWANTO (Head of WH Subdept)',
+    ])
+  ).filter(Boolean) as string[];
+
+  const handleLoadFromSystemSettings = () => {
+    let updated = { ...report };
+    if (settings.penanggungJawab) {
+      if (settings.penanggungJawab.dibuatOleh) updated.dibuatOleh = settings.penanggungJawab.dibuatOleh;
+      if (settings.penanggungJawab.disetujuiOleh) updated.disetujuiOleh = settings.penanggungJawab.disetujuiOleh;
+      if (settings.penanggungJawab.diketahuiOleh) updated.diketahuiOleh = settings.penanggungJawab.diketahuiOleh;
+    }
+    if (settings.pengaturanTanggal?.mode === 'custom' && settings.pengaturanTanggal.tanggalCustom) {
+      handleDateChange(settings.pengaturanTanggal.tanggalCustom);
+    }
+    updateReport(updated);
+    setNotification('Data penanggung jawab & tanggal berhasil dimuat dari Pengaturan Sistem!');
+    setTimeout(() => setNotification(null), 3500);
+  };
+
+  const handleClearSignatures = () => {
+    updateReport({
+      ...report,
+      dibuatOleh: '',
+      disetujuiOleh: '',
+      diketahuiOleh: '',
+    });
+    setNotification('Penanggung jawab laporan dikosongkan.');
+    setTimeout(() => setNotification(null), 3000);
+  };
 
   // Handle Date Selection (Per Tanggal, Per Bulan, Per Tahun)
   const handleDateChange = (newDateStr: string) => {
@@ -682,14 +745,32 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={handleSaveSignatureDefaultsForMonth}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
-            title="Simpan susunan nama ini untuk digunakan pada laporan bulan ini"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span>Simpan Default Bulan Ini</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleLoadFromSystemSettings}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              title="Muat tanggal dan nama penanggung jawab dari Pengaturan Sistem"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
+              <span>Muat dari Pengaturan</span>
+            </button>
+            <button
+              onClick={handleClearSignatures}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-red-50 text-slate-600 hover:text-red-600 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              title="Kosongkan nama penanggung jawab"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Kosongkan</span>
+            </button>
+            <button
+              onClick={handleSaveSignatureDefaultsForMonth}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              title="Simpan susunan nama ini untuk digunakan pada laporan bulan ini"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Simpan Default Bulan Ini</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

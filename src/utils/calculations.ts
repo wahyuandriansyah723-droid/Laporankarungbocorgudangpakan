@@ -155,3 +155,47 @@ export function calculateAnnualTotals(
   };
 }
 
+const INDONESIAN_MONTHS = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+];
+
+export function formatReportDate(
+  dateInput: Date | string,
+  format: 'DD.MM.YYYY' | 'DD/MM/YYYY' | 'DD MMMM YYYY' | 'YYYY-MM-DD' = 'DD.MM.YYYY'
+): string {
+  let d: Date;
+  if (typeof dateInput === 'string') {
+    // Check if YYYY-MM-DD
+    const parts = dateInput.split('-');
+    if (parts.length === 3) {
+      d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    } else {
+      d = new Date(dateInput);
+    }
+  } else {
+    d = dateInput;
+  }
+
+  if (isNaN(d.getTime())) {
+    d = new Date();
+  }
+
+  const day = String(d.getDate()).padStart(2, '0');
+  const monthNum = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const monthName = INDONESIAN_MONTHS[d.getMonth()] || '';
+
+  switch (format) {
+    case 'DD/MM/YYYY':
+      return `${day}/${monthNum}/${year}`;
+    case 'DD MMMM YYYY':
+      return `${day} ${monthName} ${year}`;
+    case 'YYYY-MM-DD':
+      return `${year}-${monthNum}-${day}`;
+    case 'DD.MM.YYYY':
+    default:
+      return `${day}.${monthNum}.${year}`;
+  }
+}
+

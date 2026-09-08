@@ -6,6 +6,7 @@ import {
   getDaysInMonth,
   getIndonesianDayName,
   formatNumberIndonesian,
+  formatReportDate,
 } from './calculations';
 import { loadStoredHolidays, CATEGORY_METADATA } from '../data/holidayData';
 
@@ -207,10 +208,44 @@ export function exportReportsToExcel(
     '—',
   ]);
 
+  // Pengesahan Signatures Block using settings
+  const pj = settings.penanggungJawab || {
+    dibuatOleh: 'Petugas FG WH',
+    jabatanDibuat: 'FG WH Worker',
+    nikDibuat: 'WH-0492',
+    disetujuiOleh: 'AMIN SODIK',
+    jabatanDisetujui: 'FG WH Supervisor',
+    nikDisetujui: 'SPV-0118',
+    diketahuiOleh: 'HERY SHAPRIANTO',
+    jabatanDiketahui: 'Head of WH Subdept',
+    nikDiketahui: 'HOD-0023',
+  };
+
+  const tglSettings = settings.pengaturanTanggal;
+  const kota = tglSettings?.kotaPengesahan || 'Sidoarjo';
+  const effectiveDate = tglSettings?.mode === 'realtime' ? new Date() : (tglSettings?.tanggalCustom || '2026-07-18');
+  const tglFormatted = formatReportDate(effectiveDate, tglSettings?.formatTanggal || 'DD.MM.YYYY');
+
   rows.push([]);
-  rows.push(['TANDA TANGAN PENGESAHAN TAHUNAN']);
+  rows.push([`PENGESAHAN DOKUMEN RESMI (${kota}, ${tglFormatted})`]);
   rows.push(['Dibuat Oleh:', 'Disetujui Oleh:', 'Diketahui Oleh:']);
-  rows.push(['Petugas Gudang Jadi', 'Supervisor FG Warehouse', 'Kepala Bagian Logistik']);
+  rows.push([
+    pj.dibuatOleh || '( ........................ )',
+    pj.disetujuiOleh || '( ........................ )',
+    pj.diketahuiOleh || '( ........................ )',
+  ]);
+  rows.push([
+    pj.jabatanDibuat || 'FG WH Worker',
+    pj.jabatanDisetujui || 'FG WH Supervisor',
+    pj.jabatanDiketahui || 'Head of WH Subdept',
+  ]);
+  if (pj.nikDibuat || pj.nikDisetujui || pj.nikDiketahui) {
+    rows.push([
+      pj.nikDibuat ? `NIK: ${pj.nikDibuat}` : '',
+      pj.nikDisetujui ? `NIK: ${pj.nikDisetujui}` : '',
+      pj.nikDiketahui ? `NIK: ${pj.nikDiketahui}` : '',
+    ]);
+  }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
@@ -331,11 +366,32 @@ export function exportReportsToExcel(
 
   recapRows.push([]);
   recapRows.push([]);
-  recapRows.push(['LEMBAR PENGESAHAN LAPORAN TAHUNAN', '', '', '']);
-  recapRows.push(['Dipersiapkan Oleh:', '', 'Diverifikasi Oleh:', '', 'Disahkan Oleh:']);
+  recapRows.push([`LEMBAR PENGESAHAN LAPORAN TAHUNAN (${kota}, ${tglFormatted})`, '', '', '']);
+  recapRows.push(['Dibuat Oleh:', '', 'Disetujui Oleh:', '', 'Diketahui Oleh:']);
   recapRows.push(['', '', '', '', '']);
-  recapRows.push(['( .................................... )', '', '( .................................... )', '', '( .................................... )']);
-  recapRows.push(['Petugas / Admin Gudang', '', 'Supervisor Warehouse', '', 'Manager Logistik & Distribusi']);
+  recapRows.push([
+    pj.dibuatOleh ? `( ${pj.dibuatOleh} )` : '( .................................... )',
+    '',
+    pj.disetujuiOleh ? `( ${pj.disetujuiOleh} )` : '( .................................... )',
+    '',
+    pj.diketahuiOleh ? `( ${pj.diketahuiOleh} )` : '( .................................... )',
+  ]);
+  recapRows.push([
+    pj.jabatanDibuat || 'Petugas / Admin Gudang',
+    '',
+    pj.jabatanDisetujui || 'Supervisor Warehouse',
+    '',
+    pj.jabatanDiketahui || 'Head of WH Subdept',
+  ]);
+  if (pj.nikDibuat || pj.nikDisetujui || pj.nikDiketahui) {
+    recapRows.push([
+      pj.nikDibuat ? `NIK: ${pj.nikDibuat}` : '',
+      '',
+      pj.nikDisetujui ? `NIK: ${pj.nikDisetujui}` : '',
+      '',
+      pj.nikDiketahui ? `NIK: ${pj.nikDiketahui}` : '',
+    ]);
+  }
 
   const wsRecap = XLSX.utils.aoa_to_sheet(recapRows);
   wsRecap['!cols'] = [
@@ -524,10 +580,30 @@ export function exportPetugasReportToExcel(report: PetugasReport, settings: Ware
   rows.push([]);
 
   // Approval Signatures Block
-  rows.push(['TANDA TANGAN & PERSETUJUAN']);
+  const kota = settings.pengaturanTanggal?.kotaPengesahan || 'Sidoarjo';
+  rows.push([`TANDA TANGAN & PENGESAHAN LAPORAN (${kota}, ${report.tanggalFormatted})`]);
   rows.push(['Dibuat Oleh:', 'Disetujui Oleh:', 'Diketahui Oleh:']);
-  rows.push([report.dibuatOleh, report.disetujuiOleh, report.diketahuiOleh]);
-  rows.push(['FG WH Worker', 'FG WH Supervisor', 'Head of WH Subdept']);
+  rows.push([
+    report.dibuatOleh || settings.penanggungJawab?.dibuatOleh || '( ........................ )',
+    report.disetujuiOleh || settings.penanggungJawab?.disetujuiOleh || '( ........................ )',
+    report.diketahuiOleh || settings.penanggungJawab?.diketahuiOleh || '( ........................ )',
+  ]);
+  rows.push([
+    settings.penanggungJawab?.jabatanDibuat || 'FG WH Worker',
+    settings.penanggungJawab?.jabatanDisetujui || 'FG WH Supervisor',
+    settings.penanggungJawab?.jabatanDiketahui || 'Head of WH Subdept',
+  ]);
+  if (
+    settings.penanggungJawab?.nikDibuat ||
+    settings.penanggungJawab?.nikDisetujui ||
+    settings.penanggungJawab?.nikDiketahui
+  ) {
+    rows.push([
+      settings.penanggungJawab?.nikDibuat ? `NIK: ${settings.penanggungJawab.nikDibuat}` : '',
+      settings.penanggungJawab?.nikDisetujui ? `NIK: ${settings.penanggungJawab.nikDisetujui}` : '',
+      settings.penanggungJawab?.nikDiketahui ? `NIK: ${settings.penanggungJawab.nikDiketahui}` : '',
+    ]);
+  }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
