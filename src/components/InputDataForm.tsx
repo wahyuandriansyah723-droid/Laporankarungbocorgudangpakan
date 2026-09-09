@@ -31,9 +31,9 @@ export const InputDataForm: React.FC<InputDataFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const dateObj = new Date(dateStr);
-    const monthIndex = dateObj.getMonth() + 1; // 1..12
-    const day = dateObj.getDate();
+    const parts = dateStr.split('-').map(Number);
+    const monthIndex = parts[1] || 1; // 1..12
+    const day = parts[2] || 1;
 
     const fkVal = typeof forklift === 'number' ? forklift : 0;
     const plVal = typeof pallet === 'number' ? pallet : 0;

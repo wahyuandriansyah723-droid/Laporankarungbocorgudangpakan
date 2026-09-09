@@ -14,11 +14,11 @@ import {
   DocumentData,
   QuerySnapshot,
 } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from './config';
+import { db, auth, isFirebaseConfigured } from './config';
 import { connectionManager } from './connectionManager';
 import { cacheService } from './cacheService';
 import { MonthReport, PetugasReport, LeakageRecord, WarehouseSettings } from '../types';
-import { initialMonthReports, defaultSettings } from '../data/initialData';
+import { emptyMonthReports, defaultSettings } from '../data/initialData';
 
 // Operation types for standard error handling
 export enum OperationType {
@@ -43,7 +43,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     error: errMsg,
     operationType,
     path,
-    authInfo: {},
+    authInfo: {
+      userId: auth?.currentUser?.uid || null,
+      isAnonymous: auth?.currentUser?.isAnonymous || false,
+    },
   };
   console.error('[Firestore Error]', JSON.stringify(errInfo));
 
@@ -53,6 +56,35 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   }
 
   return errInfo;
+}
+
+/**
+ * Recursively removes undefined values from objects/arrays before Firestore write.
+ * Firestore rejects writes with undefined values with 'Unsupported field value: undefined'.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return null as unknown as T;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === 'object') {
+    // Check if it's a Firestore special object (like FieldValue, serverTimestamp, Timestamp) or Date
+    if (data.constructor && data.constructor.name !== 'Object') {
+      return data;
+    }
+    const cleanObj: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      if (value !== undefined) {
+        cleanObj[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleanObj as unknown as T;
+  }
+  return data;
 }
 
 // Active listeners registry to prevent duplicates
@@ -75,7 +107,7 @@ class FirestoreService {
 
     // If Firebase is not configured or in offline/circuit breaker mode, read from cache
     if (!isFirebaseConfigured || !db || !connectionManager.shouldAllowCloudRequest()) {
-      cacheService.get<MonthReport[]>('karung_bocor_reports', initialMonthReports).then((cached) => {
+      cacheService.get<MonthReport[]>('karung_bocor_reports', emptyMonthReports).then((cached) => {
         onUpdate(cached);
       });
       return () => {};
@@ -100,7 +132,9 @@ class FirestoreService {
           connectionManager.setSyncing(false);
 
           if (snapshot.empty) {
-            // First time initialization: initialize with initial reports without blocking
+            // First time initialization: initialize with empty reports where positions are blank until inputted
+            this.batchSaveAllReports(emptyMonthReports);
+            onUpdate(emptyMonthReports);
             return;
           }
 
@@ -118,10 +152,10 @@ class FirestoreService {
             const monthIdx = i + 1;
             return (
               fetchedMonths[monthIdx] ||
-              initialMonthReports[i] || {
+              emptyMonthReports[i] || {
                 monthIndex: monthIdx,
                 monthName: `${monthIdx < 10 ? '0' : ''}${monthIdx} Bulan`,
-                penjualanKg: 0,
+                penjualanKg: 30000000,
                 dailyEntries: {},
               }
             );
@@ -161,34 +195,42 @@ class FirestoreService {
 
     if (writeDebounceTimers.has(timerKey)) {
       clearTimeout(writeDebounceTimers.get(timerKey));
+      writeDebounceTimers.delete(timerKey);
+    }
+
+    const doWrite = async () => {
+      if (!isFirebaseConfigured || !db || !connectionManager.shouldAllowCloudRequest()) {
+        return;
+      }
+
+      try {
+        connectionManager.setSyncing(true);
+        const docRef = doc(db, 'monthly_reports', docId);
+
+        await connectionManager.executeWithBackoff(async () => {
+          const payload = sanitizeForFirestore({
+            ...report,
+            updatedAt: serverTimestamp(),
+          });
+          await setDoc(docRef, payload);
+          connectionManager.incrementWrite(1);
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `monthly_reports/${docId}`);
+      } finally {
+        connectionManager.setSyncing(false);
+      }
+    };
+
+    if (debounceMs <= 0) {
+      return doWrite();
     }
 
     return new Promise((resolve) => {
       const timer = setTimeout(async () => {
         writeDebounceTimers.delete(timerKey);
-
-        if (!isFirebaseConfigured || !db || !connectionManager.shouldAllowCloudRequest()) {
-          resolve();
-          return;
-        }
-
-        try {
-          connectionManager.setSyncing(true);
-          const docRef = doc(db, 'monthly_reports', docId);
-
-          await connectionManager.executeWithBackoff(async () => {
-            await setDoc(docRef, {
-              ...report,
-              updatedAt: serverTimestamp(),
-            });
-            connectionManager.incrementWrite(1);
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `monthly_reports/${docId}`);
-        } finally {
-          connectionManager.setSyncing(false);
-          resolve();
-        }
+        await doWrite();
+        resolve();
       }, debounceMs);
 
       writeDebounceTimers.set(timerKey, timer);
@@ -213,10 +255,11 @@ class FirestoreService {
 
       reports.forEach((rep) => {
         const docRef = doc(db, 'monthly_reports', `month_${rep.monthIndex}`);
-        batch.set(docRef, {
+        const payload = sanitizeForFirestore({
           ...rep,
           updatedAt: serverTimestamp(),
         });
+        batch.set(docRef, payload);
       });
 
       await connectionManager.executeWithBackoff(async () => {
@@ -255,7 +298,7 @@ class FirestoreService {
     }
 
     try {
-      const q = query(collection(db, 'petugas_reports'), orderBy('createdAt', 'desc'), limit(50));
+      const q = query(collection(db, 'petugas_reports'), limit(50));
       connectionManager.registerListener('firestore');
 
       const unsubscribe = onSnapshot(
@@ -268,6 +311,9 @@ class FirestoreService {
           snapshot.forEach((d) => {
             list.push({ ...(d.data() as PetugasReport), id: d.id });
           });
+
+          // Sort descending by tanggalStr or id
+          list.sort((a, b) => (b.tanggalStr || '').localeCompare(a.tanggalStr || ''));
 
           cacheService.set('karung_bocor_petugas_reports', list);
           onUpdate(list);
@@ -303,10 +349,12 @@ class FirestoreService {
       connectionManager.setSyncing(true);
       const docRef = doc(db, 'petugas_reports', report.id);
       await connectionManager.executeWithBackoff(async () => {
-        await setDoc(docRef, {
+        const payload = sanitizeForFirestore({
           ...report,
           serverUpdatedAt: serverTimestamp(),
+          updatedAtStr: new Date().toISOString(),
         });
+        await setDoc(docRef, payload);
         connectionManager.incrementWrite(1);
       });
     } catch (err) {
@@ -389,10 +437,11 @@ class FirestoreService {
       connectionManager.setSyncing(true);
       const docRef = doc(db, 'leakage_logs', logItem.id);
       await connectionManager.executeWithBackoff(async () => {
-        await setDoc(docRef, {
+        const payload = sanitizeForFirestore({
           ...logItem,
           serverCreatedAt: serverTimestamp(),
         });
+        await setDoc(docRef, payload);
         connectionManager.incrementWrite(1);
       });
     } catch (err) {
@@ -474,10 +523,11 @@ class FirestoreService {
       connectionManager.setSyncing(true);
       const docRef = doc(db, 'warehouse_settings', 'main');
       await connectionManager.executeWithBackoff(async () => {
-        await setDoc(docRef, {
+        const payload = sanitizeForFirestore({
           ...settings,
           updatedAt: serverTimestamp(),
         });
+        await setDoc(docRef, payload);
         connectionManager.incrementWrite(1);
       });
     } catch (err) {

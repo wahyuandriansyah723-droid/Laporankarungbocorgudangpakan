@@ -295,7 +295,7 @@ export default function App() {
     });
 
     if (targetUpdatedReport) {
-      firestoreService.saveSingleMonthReport(targetUpdatedReport);
+      firestoreService.saveSingleMonthReport(targetUpdatedReport, 0);
     }
   };
 

@@ -5,20 +5,24 @@ import {
   persistentLocalCache, 
   persistentMultipleTabManager,
   Firestore,
-  connectFirestoreEmulator
 } from 'firebase/firestore';
-import { getAuth, Auth } from 'firebase/auth';
+import { getAuth, Auth, signInAnonymously } from 'firebase/auth';
+import appletConfig from '../../firebase-applet-config.json';
 
-// Configuration read safely from Vite environment variables
+const cfg = (appletConfig || {}) as Record<string, any>;
+
+// Configuration read safely from Vite environment variables or firebase-applet-config.json
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || cfg.apiKey || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || cfg.authDomain || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || cfg.projectId || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || cfg.storageBucket || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || cfg.messagingSenderId || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || cfg.appId || '',
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || cfg.databaseURL || '',
 };
+
+export const firestoreDatabaseId = cfg.firestoreDatabaseId || '(default)';
 
 // Check if Firebase credentials are fully configured
 export const isFirebaseConfigured = Boolean(
@@ -35,19 +39,27 @@ if (isFirebaseConfigured) {
   try {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     
-    // Enable offline persistence with multi-tab support to drastically save reads & support offline
+    // Enable offline persistence with multi-tab support to save reads & support real-time sync across devices
     try {
-      db = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
-      });
+      db = initializeFirestore(
+        app,
+        {
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+          }),
+        },
+        firestoreDatabaseId !== '(default)' ? firestoreDatabaseId : undefined
+      );
     } catch {
       // Fallback if already initialized
-      db = getFirestore(app);
+      db = getFirestore(app, firestoreDatabaseId !== '(default)' ? firestoreDatabaseId : undefined);
     }
 
     auth = getAuth(app);
+    // Sign in anonymously to establish auth session if enabled
+    signInAnonymously(auth).catch(() => {
+      // If anonymous auth is not enabled in Firebase Console, requests proceed as unauthenticated
+    });
   } catch (err) {
     console.warn('[Firebase] Initialization error (falling back to offline cache):', err);
   }

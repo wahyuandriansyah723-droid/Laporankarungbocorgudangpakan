@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   PackageCheck,
   Printer,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Info,
   ChevronRight,
+  ChevronLeft,
   Upload,
   Download,
   RefreshCw,
@@ -93,6 +94,25 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   );
 
+  // Synchronize Petugas reports from cloud Firestore & local cache across devices in real-time
+  useEffect(() => {
+    cacheService.get<PetugasReport[]>('japfa_petugas_history', [defaultPetugasReport]).then((cached) => {
+      if (cached && cached.length > 0) {
+        setReportHistory(cached);
+      }
+    });
+
+    const unsub = firestoreService.subscribePetugasReports((cloudReports) => {
+      if (cloudReports && cloudReports.length > 0) {
+        setReportHistory(cloudReports);
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, []);
+
   const indonesianDays = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const indonesianMonths = [
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -167,9 +187,67 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     setTimeout(() => setNotification(null), 3000);
   };
 
+  // Helper to generate empty feed items (preserving pakan names but zeroing all quantities)
+  const createEmptyFeedItems = (baseItems?: FeedItemLeak[]): FeedItemLeak[] => {
+    let feedNames: string[] = [];
+    if (baseItems && baseItems.length > 0) {
+      feedNames = baseItems.map((i) => i.jenisPakan);
+    } else {
+      feedNames = initialFeedTypes;
+    }
+
+    if (feedNames.length === 0) {
+      feedNames = initialFeedTypes;
+    }
+
+    return feedNames.map((name, index) => ({
+      id: `item_${Date.now()}_${index + 1}`,
+      no: index + 1,
+      jenisPakan: name || '',
+      stakAwal: 0,
+      bocorForklift: 0,
+      bocorPallet: 0,
+      bocorProduksi: 0,
+      totalBocor: 0,
+      totalJahit: 0,
+      gantiKarung: 0,
+      tidakGantiKarung: 0,
+      sisaAkhir: 0,
+      keterangan: '',
+    }));
+  };
+
+  // Quick Day Shifter (H-1 / H+1)
+  const handleShiftDay = (deltaDays: number) => {
+    const parts = report.tanggalStr.split('-');
+    if (parts.length !== 3) return;
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dateObj = new Date(y, m, d + deltaDays);
+    if (isNaN(dateObj.getTime())) return;
+    const nextY = dateObj.getFullYear();
+    const nextM = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const nextD = String(dateObj.getDate()).padStart(2, '0');
+    handleDateChange(`${nextY}-${nextM}-${nextD}`);
+  };
+
+  // Parse typed DD.MM.YYYY string
+  const handleFormattedDateBlur = (val: string) => {
+    const match = val.trim().match(/^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$/);
+    if (match) {
+      const d = match[1].padStart(2, '0');
+      const m = match[2].padStart(2, '0');
+      const y = match[3];
+      handleDateChange(`${y}-${m}-${d}`);
+    }
+  };
+
   // Handle Date Selection (Per Tanggal, Per Bulan, Per Tahun)
   const handleDateChange = (newDateStr: string) => {
     if (!newDateStr) return;
+    if (newDateStr === report.tanggalStr) return;
+
     const parts = newDateStr.split('-');
     if (parts.length !== 3) return;
 
@@ -202,25 +280,55 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
       }
     }
 
-    const updated = {
-      ...report,
-      tanggalStr: newDateStr,
-      hari: dayName,
-      tanggalFormatted: formatted,
-      isRedDay: isRedHoliday,
-      ...sigs,
-    };
-
-    updateReport(updated);
-
-    if (onSyncToMainReport) {
-      const grandForklift = report.items.reduce((sum, i) => sum + (i.bocorForklift || 0), 0);
-      const grandPallet = report.items.reduce((sum, i) => sum + (i.bocorPallet || 0), 0);
-      const grandProduksi = report.items.reduce((sum, i) => sum + (i.bocorProduksi || 0), 0);
-      onSyncToMainReport(m + 1, d, grandForklift, grandPallet, grandProduksi, undefined, isRedHoliday);
+    // 1. Simpan laporan aktif hari saat ini ke history lokal agar data tidak hilang jika kembali ke tanggal ini
+    let updatedHistory = [...reportHistory];
+    const existingCurrentIdx = updatedHistory.findIndex(
+      (h) => h.id === report.id || h.tanggalStr === report.tanggalStr
+    );
+    if (existingCurrentIdx >= 0) {
+      updatedHistory[existingCurrentIdx] = report;
+    } else {
+      updatedHistory = [report, ...updatedHistory];
     }
+    setReportHistory(updatedHistory);
+    localStorage.setItem('japfa_petugas_history', JSON.stringify(updatedHistory));
 
-    showToast(`Tanggal disesuaikan ke ${dayName}, ${formatted}${isRedHoliday ? ' (Hari Libur / Latar Merah)' : ''}.`);
+    // 2. Cek apakah tanggal tujuan SUDAH memiliki data tersimpan di history/cloud
+    const existingTargetReport = updatedHistory.find(
+      (h) => h.tanggalStr === newDateStr || h.id === `petugas_${newDateStr}`
+    );
+
+    if (existingTargetReport) {
+      // Muat data laporan yang sudah pernah disimpan pada tanggal ini
+      const restored: PetugasReport = {
+        ...existingTargetReport,
+        dibuatOleh: existingTargetReport.dibuatOleh || sigs.dibuatOleh || 'Petugas FG WH',
+        disetujuiOleh: existingTargetReport.disetujuiOleh || sigs.disetujuiOleh || '',
+        diketahuiOleh: existingTargetReport.diketahuiOleh || sigs.diketahuiOleh || '',
+      };
+      updateReport(restored);
+      const totalBocorRestored = restored.items.reduce((sum, i) => sum + (i.totalBocor || 0), 0);
+      showToast(`Pindah ke ${dayName}, ${formatted}: Memuat data tersimpan (${totalBocorRestored} karung bocor).`);
+    } else {
+      // Tanggal baru: Data hari sebelumnya TIDAK IKUT / POSISI KOSONG (0 / blank)
+      const emptyReport: PetugasReport = {
+        id: `petugas_${newDateStr}`,
+        tanggalStr: newDateStr,
+        hari: dayName,
+        tanggalFormatted: formatted,
+        shift: report.shift || 'Shift 1',
+        dibuatOleh: sigs.dibuatOleh || report.dibuatOleh || 'Petugas FG WH',
+        disetujuiOleh: sigs.disetujuiOleh || report.disetujuiOleh || '',
+        diketahuiOleh: sigs.diketahuiOleh || report.diketahuiOleh || '',
+        statusApproval: 'Draft',
+        items: createEmptyFeedItems(report.items),
+        catatanPetugas: '',
+        isRedDay: isRedHoliday,
+        createdAt: new Date().toISOString(),
+      };
+      updateReport(emptyReport);
+      showToast(`Pindah ke ${dayName}, ${formatted}: Tabel karung bocor dalam posisi kosong (bersih).`);
+    }
   };
 
   // Toggle Red Day / Hari Libur for Excel
@@ -470,30 +578,41 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     showToast('Formulir berhasil dikosongkan.');
   };
 
-  // Save report to history & optional main log sync
-  const handleSaveReport = () => {
-    const existingIndex = reportHistory.findIndex((h) => h.id === report.id);
+  // Save report to database & sync to main report Excel
+  const handleSaveReport = async () => {
+    setIsSyncing(true);
+
+    const finalReport: PetugasReport = {
+      ...report,
+      id: report.id || `petugas_${report.tanggalStr}`,
+    };
+
+    const existingIndex = reportHistory.findIndex((h) => h.id === finalReport.id || h.tanggalStr === finalReport.tanggalStr);
     let updatedHistory: PetugasReport[];
     if (existingIndex >= 0) {
       updatedHistory = [...reportHistory];
-      updatedHistory[existingIndex] = report;
+      updatedHistory[existingIndex] = finalReport;
     } else {
-      updatedHistory = [report, ...reportHistory];
+      updatedHistory = [finalReport, ...reportHistory];
     }
 
     setReportHistory(updatedHistory);
     localStorage.setItem('japfa_petugas_history', JSON.stringify(updatedHistory));
-    cacheService.set('japfa_petugas_history', updatedHistory);
-    firestoreService.savePetugasReport(report);
+    await cacheService.set('japfa_petugas_history', updatedHistory);
 
-    // Calculate totals
-    const grandForklift = report.items.reduce((sum, i) => sum + (i.bocorForklift || 0), 0);
-    const grandPallet = report.items.reduce((sum, i) => sum + (i.bocorPallet || 0), 0);
-    const grandProduksi = report.items.reduce((sum, i) => sum + (i.bocorProduksi || 0), 0);
-    const grandTotalBocor = report.items.reduce((sum, i) => sum + (i.totalBocor || 0), 0);
+    // Calculate totals accurately across all rows
+    const grandForklift = finalReport.items.reduce((sum, i) => sum + (i.bocorForklift || 0), 0);
+    const grandPallet = finalReport.items.reduce((sum, i) => sum + (i.bocorPallet || 0), 0);
+    const grandProduksi = finalReport.items.reduce((sum, i) => sum + (i.bocorProduksi || 0), 0);
+    const sumCalculated = grandForklift + grandPallet + grandProduksi;
+    const explicitSum = finalReport.items.reduce((sum, i) => sum + (i.totalBocor || 0), 0);
+    const grandTotalBocor = explicitSum > 0 ? explicitSum : sumCalculated;
+
+    // Save report to Firestore collection 'petugas_reports'
+    await firestoreService.savePetugasReport(finalReport);
 
     // Sync to main monthly report and log
-    const parts = report.tanggalStr.split('-');
+    const parts = finalReport.tanggalStr.split('-');
     const mIdx = parts[1] ? parseInt(parts[1], 10) : 7;
     const dNum = parts[2] ? parseInt(parts[2], 10) : 18;
 
@@ -505,36 +624,37 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
         grandPallet,
         grandProduksi,
         {
-          date: report.tanggalStr,
+          date: finalReport.tanggalStr,
           monthIndex: mIdx,
           day: dNum,
           forklift: grandForklift,
           pallet: grandPallet,
           bocorProduksi: grandProduksi,
           totalBocor: grandTotalBocor,
-          shift: report.shift,
-          operator: report.dibuatOleh,
-          catatan: `Laporan Petugas JAPFA (${grandTotalBocor} karung - ${report.items.filter(i => i.totalBocor > 0).length} jenis pakan)`,
+          shift: finalReport.shift,
+          operator: finalReport.dibuatOleh,
+          catatan: `Laporan Petugas JAPFA (${grandTotalBocor} karung [Forklift: ${grandForklift}, Pallet: ${grandPallet}, Produksi: ${grandProduksi}])`,
         },
-        report.isRedDay
+        finalReport.isRedDay
       );
     } else if (onSaveToMainLog) {
       onSaveToMainLog({
-        date: report.tanggalStr,
+        date: finalReport.tanggalStr,
         monthIndex: mIdx,
         day: dNum,
         forklift: grandForklift,
         pallet: grandPallet,
         bocorProduksi: grandProduksi,
         totalBocor: grandTotalBocor,
-        shift: report.shift,
-        operator: report.dibuatOleh,
-        catatan: `Laporan Petugas JAPFA (${grandTotalBocor} karung - ${report.items.filter(i => i.totalBocor > 0).length} jenis pakan)`,
+        shift: finalReport.shift,
+        operator: finalReport.dibuatOleh,
+        catatan: `Laporan Petugas JAPFA (${grandTotalBocor} karung [Forklift: ${grandForklift}, Pallet: ${grandPallet}, Produksi: ${grandProduksi}])`,
       });
     }
 
+    setIsSyncing(false);
     setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    showToast(`Laporan Petugas berhasil disimpan & disinkronkan langsung ke Laporan Rekap Bulanan Excel (${grandTotalBocor} karung)!`);
+    showToast(`Tabel Laporan Karung Bocor Berhasil Disimpan & Disinkronkan! Bocor Forklift: ${grandForklift}, Bocor Pallet: ${grandPallet}, Bocor Produksi: ${grandProduksi} (Total: ${grandTotalBocor} karung) telah tersinkronisasi ke Tampilan Laporan Excel secara Real-time.`);
   };
 
   // Print function
@@ -642,10 +762,12 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
 
           <button
             onClick={handleSaveReport}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors"
+            disabled={isSyncing}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-60"
+            title="Simpan Laporan Petugas dan sinkronkan ke Laporan Excel Bulanan"
           >
-            <Save className="w-4 h-4 text-amber-400" />
-            <span>Simpan & Sync Log</span>
+            <Save className="w-4 h-4 text-emerald-200" />
+            <span>{isSyncing ? 'Menyimpan...' : 'Simpan & Sync ke Excel'}</span>
           </button>
 
           <button
@@ -776,16 +898,39 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Tanggal / Date Picker */}
           <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-blue-600" />
-              Pilih Tanggal Laporan:
-            </label>
-            <input
-              type="date"
-              value={report.tanggalStr}
-              onChange={(e) => handleDateChange(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                Pilih Tanggal Laporan:
+              </label>
+              <span className="text-[10px] text-slate-500 font-medium">(Pindah Hari = Posisi Kosong)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handleShiftDay(-1)}
+                className="px-2 py-1.5 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg cursor-pointer transition-colors flex items-center gap-0.5"
+                title="Pindah ke hari sebelumnya (H-1)"
+              >
+                <ChevronLeft className="w-3 h-3" />
+                <span>H-1</span>
+              </button>
+              <input
+                type="date"
+                value={report.tanggalStr}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="flex-1 px-2 py-1.5 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-center"
+              />
+              <button
+                type="button"
+                onClick={() => handleShiftDay(1)}
+                className="px-2 py-1.5 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg cursor-pointer transition-colors flex items-center gap-0.5"
+                title="Pindah ke hari berikutnya (H+1)"
+              >
+                <span>H+1</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
             <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold px-0.5 pt-0.5">
               <span>{report.hari}, {report.tanggalFormatted}</span>
               <span className="text-blue-700 font-bold">Shift: {report.shift}</span>
@@ -913,6 +1058,7 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
                   type="text"
                   value={report.tanggalFormatted}
                   onChange={(e) => updateReport({ ...report, tanggalFormatted: e.target.value })}
+                  onBlur={(e) => handleFormattedDateBlur(e.target.value)}
                   className="border border-slate-300 rounded px-2 py-0.5 font-bold text-xs bg-slate-50 focus:bg-white w-28 text-slate-900 print:border-none print:bg-transparent"
                   placeholder="DD.MM.YYYY"
                 />
@@ -961,6 +1107,55 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
             <option key={i} value={feed} />
           ))}
         </datalist>
+
+        {/* Dedicated Save & Excel Sync Action Bar for Tabel Laporan Karung Bocor */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-amber-50 to-amber-100/70 border border-amber-300 rounded-xl p-3.5 shadow-xs print:hidden">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500 text-slate-950 rounded-lg font-black shadow-xs flex-shrink-0">
+              <Save className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                  Tabel Laporan Karung Bocor FG WH
+                </span>
+                <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                  Sinkron Otomatis Real-time
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-700 mt-0.5 font-medium">
+                Data kerusakan: <span className="font-bold text-slate-900">Forklift ({sumForklift})</span>, <span className="font-bold text-slate-900">Pallet ({sumPallet})</span>, <span className="font-bold text-slate-900">Produksi ({sumProduksi})</span> &rarr; Total <span className="font-extrabold text-amber-800 text-xs">{sumTotalBocor} Karung</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSaveReport}
+              disabled={isSyncing}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white rounded-lg text-xs font-black shadow-md transition-all cursor-pointer hover:shadow-lg disabled:opacity-60"
+              title="Simpan tabel karung bocor ke database dan sinkronkan Forklift, Pallet, dan Produksi ke Laporan Excel"
+            >
+              <Save className="w-4 h-4 text-emerald-200" />
+              <span>{isSyncing ? 'Menyimpan & Menyinkronkan...' : 'SIMPAN TABEL KARUNG BOCOR & SYNC KE EXCEL'}</span>
+            </button>
+
+            {onNavigateToMainTable && (
+              <button
+                onClick={() => {
+                  handleSaveReport();
+                  onNavigateToMainTable();
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                title="Simpan dan langsung lihat di Tampilan Laporan Excel"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Lihat di Excel &rarr;</span>
+              </button>
+            )}
+          </div>
+        </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse border border-slate-800 font-sans">
@@ -1157,10 +1352,20 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
 
         {/* Form Controls below table */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 print:hidden">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleSaveReport}
+              disabled={isSyncing}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white rounded-lg text-xs font-black shadow-md transition-all cursor-pointer hover:shadow-lg disabled:opacity-60"
+              title="Simpan tabel karung bocor ke database dan sinkronkan Forklift, Pallet, dan Produksi ke Laporan Excel"
+            >
+              <Save className="w-4 h-4 text-amber-300" />
+              <span>{isSyncing ? 'Menyimpan...' : 'SIMPAN TABEL KARUNG BOCOR'}</span>
+            </button>
+
             <button
               onClick={handleAddRow}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold border border-slate-300 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold border border-slate-300 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4 text-slate-600" />
               <span>Tambah Baris Pakan</span>
@@ -1168,7 +1373,7 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-lg text-xs font-bold border border-emerald-300 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-lg text-xs font-bold border border-emerald-300 transition-colors cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-emerald-700" />
               <span>Upload Excel (.xlsx)</span>
@@ -1176,16 +1381,30 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
 
             <button
               onClick={handleExportExcel}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-colors shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors shadow-xs cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-200" />
+              <Download className="w-3.5 h-3.5 text-emerald-300" />
               <span>Unduh Excel Realtime</span>
             </button>
+
+            {onNavigateToMainTable && (
+              <button
+                onClick={() => {
+                  handleSaveReport();
+                  onNavigateToMainTable();
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                title="Buka buku spreadsheet laporan Excel"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Buka Tampilan Excel &rarr;</span>
+              </button>
+            )}
           </div>
 
           <button
             onClick={handleClearForm}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-red-600 transition-colors"
+            className="flex items-center gap-1 px-3 py-2 text-xs text-slate-500 hover:text-red-600 transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Kosongkan Angka</span>

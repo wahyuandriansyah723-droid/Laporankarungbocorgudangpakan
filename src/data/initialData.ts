@@ -41,12 +41,15 @@ export function createEmptyMonthReports(): MonthReport[] {
     const dailyEntries: Record<number, any> = {};
     for (let d = 1; d <= days; d++) {
       const isRed = isIndonesianRedDay(year, monthIndex, d);
-      dailyEntries[d] = {
+      const entry: any = {
         forklift: 0,
         pallet: 0,
         bocorProduksi: 0,
-        isRedDay: isRed ? true : undefined,
       };
+      if (isRed) {
+        entry.isRedDay = true;
+      }
+      dailyEntries[d] = entry;
     }
     return {
       monthIndex,
