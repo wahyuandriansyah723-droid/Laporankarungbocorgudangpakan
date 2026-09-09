@@ -5,6 +5,7 @@ import {
   PenanggungJawabLaporan,
   PenanggungJawabProfile,
 } from '../types';
+import { defaultMasterFeedTypes } from './samplePetugasReport';
 
 export function isIndonesianRedDay(year: number, monthIndex: number, day: number): boolean {
   // monthIndex is 1..12
@@ -102,6 +103,7 @@ export const defaultSettings: WarehouseSettings = {
   pengaturanTanggal: defaultTanggalSettings,
   penanggungJawab: defaultPenanggungJawab,
   daftarProfilPenanggungJawab: defaultProfilPenanggungJawab,
+  masterJenisPakan: defaultMasterFeedTypes,
 };
 
 export const initialMonthReports: MonthReport[] = [

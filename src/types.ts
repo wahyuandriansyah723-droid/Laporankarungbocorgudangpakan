@@ -103,6 +103,17 @@ export interface PenanggungJawabLaporan {
   nikDiketahui?: string;
 }
 
+export interface MasterJenisPakan {
+  id: string;
+  kode?: string;
+  nama: string; // e.g. "Parli", "Par DOC", "SB 10"
+  kategori?: string; // e.g. "Broiler", "Layer", "DOC", "Konsentrat", "Bebek", "Umum"
+  beratKemasan?: number; // default 50 (kg)
+  keterangan?: string;
+  isActive: boolean;
+  urutan: number;
+}
+
 export interface WarehouseSettings {
   namaSistem?: string; // e.g. "LAPORAN KARUNG BOCOR" (Customizable system title)
   subNamaSistem?: string; // e.g. "GUDANG JADI (GBJ)" (Sub-title / unit badge)
@@ -114,4 +125,7 @@ export interface WarehouseSettings {
   pengaturanTanggal?: TanggalLaporanSettings;
   penanggungJawab?: PenanggungJawabLaporan;
   daftarProfilPenanggungJawab?: PenanggungJawabProfile[];
+
+  // Master Data Jenis Pakan Ternak (Tabel Petugas JAPFA)
+  masterJenisPakan?: MasterJenisPakan[];
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   PackageCheck,
   Printer,
@@ -21,14 +21,16 @@ import {
   Upload,
   Download,
   RefreshCw,
+  Layers,
 } from 'lucide-react';
-import { PetugasReport, FeedItemLeak, LeakageRecord, WarehouseSettings } from '../types';
-import { defaultPetugasReport, sampleJapfaReportItems, initialFeedTypes } from '../data/samplePetugasReport';
+import { PetugasReport, FeedItemLeak, LeakageRecord, WarehouseSettings, MasterJenisPakan } from '../types';
+import { defaultPetugasReport, sampleJapfaReportItems, initialFeedTypes, defaultMasterFeedTypes } from '../data/samplePetugasReport';
 import { isIndonesianRedDay } from '../data/initialData';
 import { formatNumberIndonesian } from '../utils/calculations';
 import { exportPetugasReportToExcel, importPetugasReportFromExcel } from '../utils/excelExport';
 import { firestoreService } from '../firebase/firestoreService';
 import { cacheService } from '../firebase/cacheService';
+import { MasterPakanModal } from './MasterPakanModal';
 import {
   BarChart,
   Bar,
@@ -42,6 +44,7 @@ import {
 
 interface PetugasDashboardViewProps {
   settings: WarehouseSettings;
+  onUpdateSettings?: (newSettings: WarehouseSettings) => void;
   onSaveToMainLog?: (record: Omit<LeakageRecord, 'id'>) => void;
   onSyncToMainReport?: (
     monthIndex: number,
@@ -57,6 +60,7 @@ interface PetugasDashboardViewProps {
 
 export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
   settings,
+  onUpdateSettings,
   onSaveToMainLog,
   onSyncToMainReport,
   onNavigateToMainTable,
@@ -187,20 +191,123 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     setTimeout(() => setNotification(null), 3000);
   };
 
+  // Master Data Modal & Feeds List
+  const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
+
+  const masterPakanList: MasterJenisPakan[] = useMemo(() => {
+    if (settings.masterJenisPakan && settings.masterJenisPakan.length > 0) {
+      return settings.masterJenisPakan;
+    }
+    return defaultMasterFeedTypes;
+  }, [settings.masterJenisPakan]);
+
+  const activeMasterPakan = useMemo(() => {
+    return masterPakanList.filter((f) => f.isActive);
+  }, [masterPakanList]);
+
+  // Fast lookup map from feed name to Master item (for displaying codes / metadata)
+  const masterFeedMap = useMemo(() => {
+    const map = new Map<string, MasterJenisPakan>();
+    masterPakanList.forEach((m) => {
+      map.set(m.nama.toLowerCase().trim(), m);
+    });
+    return map;
+  }, [masterPakanList]);
+
+  const handleSaveMasterPakan = async (newList: MasterJenisPakan[]) => {
+    const updatedSettings: WarehouseSettings = {
+      ...settings,
+      masterJenisPakan: newList,
+    };
+    if (onUpdateSettings) {
+      onUpdateSettings(updatedSettings);
+    } else {
+      await firestoreService.saveSettings(updatedSettings);
+      await cacheService.set('karung_bocor_settings', updatedSettings);
+    }
+    setNotification('Master data jenis pakan berhasil disimpan & disinkronkan!');
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const handleApplyMasterToActiveReport = (activeFeedNames: string[]) => {
+    if (!activeFeedNames || activeFeedNames.length === 0) return;
+
+    const existingByFeed = new Map<string, FeedItemLeak>();
+    report.items.forEach((item) => {
+      if (item.jenisPakan && item.jenisPakan.trim()) {
+        existingByFeed.set(item.jenisPakan.trim().toLowerCase(), item);
+      }
+    });
+
+    const newRows: FeedItemLeak[] = activeFeedNames.map((name, index) => {
+      const existing = existingByFeed.get(name.trim().toLowerCase());
+      if (existing) {
+        return {
+          ...existing,
+          no: index + 1,
+          jenisPakan: name,
+        };
+      }
+      return {
+        id: `item_${Date.now()}_${index + 1}`,
+        no: index + 1,
+        jenisPakan: name,
+        stakAwal: 0,
+        bocorForklift: 0,
+        bocorPallet: 0,
+        bocorProduksi: 0,
+        totalBocor: 0,
+        totalJahit: 0,
+        gantiKarung: 0,
+        tidakGantiKarung: 0,
+        sisaAkhir: 0,
+        keterangan: '',
+      };
+    });
+
+    // Ensure at least 20 rows
+    const finalRows = [...newRows];
+    while (finalRows.length < 20) {
+      const idx = finalRows.length + 1;
+      finalRows.push({
+        id: `item_${Date.now()}_${idx}`,
+        no: idx,
+        jenisPakan: '',
+        stakAwal: 0,
+        bocorForklift: 0,
+        bocorPallet: 0,
+        bocorProduksi: 0,
+        totalBocor: 0,
+        totalJahit: 0,
+        gantiKarung: 0,
+        tidakGantiKarung: 0,
+        sisaAkhir: 0,
+        keterangan: '',
+      });
+    }
+
+    updateReport({
+      ...report,
+      items: finalRows,
+    });
+    setNotification(`Berhasil menerapkan ${activeFeedNames.length} jenis pakan aktif ke lembar hari ini!`);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
   // Helper to generate empty feed items (preserving pakan names but zeroing all quantities)
   const createEmptyFeedItems = (baseItems?: FeedItemLeak[]): FeedItemLeak[] => {
     let feedNames: string[] = [];
     if (baseItems && baseItems.length > 0) {
       feedNames = baseItems.map((i) => i.jenisPakan);
     } else {
-      feedNames = initialFeedTypes;
+      feedNames = activeMasterPakan.length > 0 ? activeMasterPakan.map((f) => f.nama) : initialFeedTypes;
     }
 
     if (feedNames.length === 0) {
       feedNames = initialFeedTypes;
     }
 
-    return feedNames.map((name, index) => ({
+    const rows = feedNames.map((name, index) => ({
       id: `item_${Date.now()}_${index + 1}`,
       no: index + 1,
       jenisPakan: name || '',
@@ -215,6 +322,27 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
       sisaAkhir: 0,
       keterangan: '',
     }));
+
+    while (rows.length < 20) {
+      const idx = rows.length + 1;
+      rows.push({
+        id: `item_${Date.now()}_${idx}`,
+        no: idx,
+        jenisPakan: '',
+        stakAwal: 0,
+        bocorForklift: 0,
+        bocorPallet: 0,
+        bocorProduksi: 0,
+        totalBocor: 0,
+        totalJahit: 0,
+        gantiKarung: 0,
+        tidakGantiKarung: 0,
+        sisaAkhir: 0,
+        keterangan: '',
+      });
+    }
+
+    return rows;
   };
 
   // Quick Day Shifter (H-1 / H+1)
@@ -733,6 +861,15 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
           />
 
           <button
+            onClick={() => setIsMasterModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+            title="Kelola Master Data Nama Jenis Pakan Ternak JAPFA"
+          >
+            <Layers className="w-4 h-4 text-indigo-200" />
+            <span>Master Data Pakan ({activeMasterPakan.length})</span>
+          </button>
+
+          <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isSyncing}
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50"
@@ -1103,8 +1240,10 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
 
         {/* Paper Sheet Worksheet Table */}
         <datalist id="pakan-options">
-          {initialFeedTypes.filter(Boolean).map((feed, i) => (
-            <option key={i} value={feed} />
+          {activeMasterPakan.map((feed) => (
+            <option key={feed.id} value={feed.nama}>
+              {feed.kode ? `[${feed.kode}] ` : ''}{feed.kategori ? `(${feed.kategori})` : ''}
+            </option>
           ))}
         </datalist>
 
@@ -1130,7 +1269,17 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsMasterModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              title="Kelola Master Data Nama Jenis Pakan Ternak JAPFA"
+            >
+              <Layers className="w-4 h-4 text-indigo-200" />
+              <span>Master Data Pakan ({activeMasterPakan.length})</span>
+            </button>
+
             <button
               onClick={handleSaveReport}
               disabled={isSyncing}
@@ -1179,6 +1328,8 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
             <tbody>
               {report.items.map((item, index) => {
                 const isDamaged = (item.totalBocor || 0) > 0;
+                const matchedFeed = masterFeedMap.get((item.jenisPakan || '').toLowerCase().trim());
+
                 return (
                   <tr
                     key={item.id || index}
@@ -1191,14 +1342,24 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
                     </td>
 
                     <td className="p-1 border border-slate-800 text-left font-bold text-slate-900">
-                      <input
-                        type="text"
-                        list="pakan-options"
-                        value={item.jenisPakan}
-                        onChange={(e) => handleItemChange(index, 'jenisPakan', e.target.value)}
-                        placeholder="Pilih/ketik pakan..."
-                        className="w-full px-1.5 py-0.5 font-bold text-slate-900 bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-800 rounded uppercase"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          list="pakan-options"
+                          value={item.jenisPakan}
+                          onChange={(e) => handleItemChange(index, 'jenisPakan', e.target.value)}
+                          placeholder="Pilih/ketik pakan..."
+                          className="w-full px-1.5 py-0.5 font-bold text-slate-900 bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-800 rounded uppercase"
+                        />
+                        {matchedFeed && matchedFeed.kode && (
+                          <span
+                            className="text-[9px] font-mono font-black bg-blue-100 text-blue-800 px-1 py-0.5 rounded border border-blue-200 print:hidden flex-shrink-0"
+                            title={`Kode: ${matchedFeed.kode} | Kategori: ${matchedFeed.kategori || '-'} | Kemasan: ${matchedFeed.beratKemasan || 50}kg`}
+                          >
+                            {matchedFeed.kode}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="p-1 border border-slate-800">
@@ -1532,6 +1693,15 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Master Data Pakan Management Modal */}
+      <MasterPakanModal
+        isOpen={isMasterModalOpen}
+        onClose={() => setIsMasterModalOpen(false)}
+        masterPakanList={masterPakanList}
+        onSaveMasterPakan={handleSaveMasterPakan}
+        onApplyToActiveReport={handleApplyMasterToActiveReport}
+      />
     </div>
   );
 };

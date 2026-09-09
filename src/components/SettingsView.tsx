@@ -4,6 +4,7 @@ import {
   TanggalLaporanSettings,
   PenanggungJawabLaporan,
   PenanggungJawabProfile,
+  MasterJenisPakan,
 } from '../types';
 import {
   Settings,
@@ -33,6 +34,7 @@ import {
   CheckCheck,
   ShieldCheck,
   Plus,
+  Layers,
 } from 'lucide-react';
 import { formatReportDate } from '../utils/calculations';
 import {
@@ -40,6 +42,8 @@ import {
   defaultPenanggungJawab,
   defaultProfilPenanggungJawab,
 } from '../data/initialData';
+import { defaultMasterFeedTypes } from '../data/samplePetugasReport';
+import { MasterPakanModal } from './MasterPakanModal';
 
 interface SettingsViewProps {
   settings: WarehouseSettings;
@@ -124,6 +128,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     settings.daftarProfilPenanggungJawab || defaultProfilPenanggungJawab
   );
 
+  // --- Active State: Master Data Jenis Pakan Ternak ---
+  const [masterPakanList, setMasterPakanList] = useState<MasterJenisPakan[]>(
+    settings.masterJenisPakan && settings.masterJenisPakan.length > 0
+      ? settings.masterJenisPakan
+      : defaultMasterFeedTypes
+  );
+  const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
+
   // Modals & UI States
   const [savedMsg, setSavedMsg] = useState<{ text: string; type: 'success' | 'danger' } | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -189,6 +201,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (settings.daftarProfilPenanggungJawab) {
       setProfilList(settings.daftarProfilPenanggungJawab);
     }
+
+    if (settings.masterJenisPakan && settings.masterJenisPakan.length > 0) {
+      setMasterPakanList(settings.masterJenisPakan);
+    }
   }, [settings]);
 
   // Calculated display date based on current setting
@@ -230,8 +246,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       pengaturanTanggal: updatedTanggal,
       penanggungJawab: updatedPJ,
       daftarProfilPenanggungJawab: profilList,
+      masterJenisPakan: masterPakanList,
       ...overrides,
     };
+  };
+
+  // --- HANDLER: SIMPAN MASTER DATA PAKAN DARI PENGATURAN ---
+  const handleSaveMasterPakanFromSettings = (newList: MasterJenisPakan[]) => {
+    setMasterPakanList(newList);
+    const newSettings = buildCombinedSettings({ masterJenisPakan: newList });
+    onSaveSettings(newSettings);
+    setSavedMsg({
+      text: `Master Data Jenis Pakan (${newList.length} pakan) berhasil disimpan dan disinkronkan!`,
+      type: 'success',
+    });
+    setTimeout(() => setSavedMsg(null), 3500);
   };
 
   // --- HANDLER: SIMPAN SELURUH PENGATURAN ---
@@ -1695,7 +1724,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* ========================================================== */}
-      {/* CARD 5: STANDAR BOBOT KEMASAN & TOLERANSI GUDANG          */}
+      {/* CARD 5: MASTER DATA NAMA-NAMA JENIS PAKAN (JAPFA WH)       */}
+      {/* ========================================================== */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-tight">
+                  Master Data Jenis Pakan Ternak
+                </h3>
+                <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-indigo-200">
+                  {masterPakanList.filter((f) => f.isActive).length} Aktif / {masterPakanList.length} Total
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium">
+                Daftar referensi resmi nama jenis pakan untuk input autocomplete dan tabel di Laporan Petugas JAPFA
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsMasterModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
+          >
+            <Layers className="w-4 h-4 text-indigo-200" />
+            <span>Kelola Master Data Pakan</span>
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 text-xs">
+          {/* Quick Preview Chips of Feeds */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                Pratinjau Varian Pakan Aktif:
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsMasterModalOpen(true)}
+                className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline"
+              >
+                + Tambah / Edit / Urutkan &rarr;
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+              {masterPakanList.map((feed, idx) => (
+                <span
+                  key={feed.id}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
+                    feed.isActive
+                      ? 'bg-white text-slate-800 border-slate-300 shadow-2xs'
+                      : 'bg-slate-200/60 text-slate-400 border-slate-300 line-through'
+                  }`}
+                >
+                  <span className="font-mono text-[9px] text-slate-400 font-bold">{idx + 1}.</span>
+                  <span className="font-bold">{feed.nama}</span>
+                  {feed.kode && (
+                    <span className="bg-indigo-50 text-indigo-700 px-1 py-0.2 rounded text-[9px] font-mono font-bold">
+                      {feed.kode}
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              Perubahan pada master data pakan akan otomatis memperbarui daftar pilihan dan autocomplete pada lembar kerja petugas FG WH.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================== */}
+      {/* CARD 6: STANDAR BOBOT KEMASAN & TOLERANSI GUDANG          */}
       {/* ========================================================== */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex items-center gap-3">
@@ -2125,6 +2231,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Master Data Pakan Modal */}
+      <MasterPakanModal
+        isOpen={isMasterModalOpen}
+        onClose={() => setIsMasterModalOpen(false)}
+        masterPakanList={masterPakanList}
+        onSaveMasterPakan={handleSaveMasterPakanFromSettings}
+      />
     </div>
   );
 };

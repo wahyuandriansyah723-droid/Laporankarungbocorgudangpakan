@@ -1,27 +1,25 @@
-import { PetugasReport, FeedItemLeak } from '../types';
+import { PetugasReport, FeedItemLeak, MasterJenisPakan } from '../types';
 
-export const initialFeedTypes = [
-  'Parli',
-  'Par DOC',
-  'Par GOLD',
-  'SB 10',
-  'SB 11 AC',
-  'SB 12',
-  'KUK SUPRA',
-  'M11',
-  '6F511',
-  'KLK',
-  'B1L',
-  'ABS',
-  'SB DOC',
-  'BR1',
-  'BR1M',
-  'BR11',
-  '',
-  '',
-  '',
-  '',
+export const defaultMasterFeedTypes: MasterJenisPakan[] = [
+  { id: 'pakan-1', kode: 'PRL', nama: 'Parli', kategori: 'Broiler Starter', beratKemasan: 50, isActive: true, urutan: 1, keterangan: 'Pakan broiler starter masa awal' },
+  { id: 'pakan-2', kode: 'DOC', nama: 'Par DOC', kategori: 'DOC Pakan Awal', beratKemasan: 50, isActive: true, urutan: 2, keterangan: 'Pakan bibit ayam umur 1-7 hari' },
+  { id: 'pakan-3', kode: 'PGL', nama: 'Par GOLD', kategori: 'Broiler Finisher', beratKemasan: 50, isActive: true, urutan: 3, keterangan: 'Pakan pedaging kualitas super gold' },
+  { id: 'pakan-4', kode: 'SB10', nama: 'SB 10', kategori: 'Layer Starter', beratKemasan: 50, isActive: true, urutan: 4, keterangan: 'Pakan ayam petelur fase starter' },
+  { id: 'pakan-5', kode: 'SB11', nama: 'SB 11 AC', kategori: 'Layer Grower', beratKemasan: 50, isActive: true, urutan: 5, keterangan: 'Pakan ayam petelur grower anti-clumping' },
+  { id: 'pakan-6', kode: 'SB12', nama: 'SB 12', kategori: 'Layer Produksi', beratKemasan: 50, isActive: true, urutan: 6, keterangan: 'Pakan ayam petelur fase bertelur puncak' },
+  { id: 'pakan-7', kode: 'KSUP', nama: 'KUK SUPRA', kategori: 'Konsentrat Petelur', beratKemasan: 50, isActive: true, urutan: 7, keterangan: 'Konsentrat protein tinggi petelur' },
+  { id: 'pakan-8', kode: 'M11', nama: 'M11', kategori: 'Broiler Campuran', beratKemasan: 50, isActive: true, urutan: 8, keterangan: 'Pakan broiler ransum grower' },
+  { id: 'pakan-9', kode: '6F511', nama: '6F511', kategori: 'Finisher Komersil', beratKemasan: 50, isActive: true, urutan: 9, keterangan: 'Pakan komplit pedaging akhir' },
+  { id: 'pakan-10', kode: 'KLK', nama: 'KLK', kategori: 'Konsentrat Lapisan', beratKemasan: 50, isActive: true, urutan: 10, keterangan: 'Konsentrat layer khusus' },
+  { id: 'pakan-11', kode: 'B1L', nama: 'B1L', kategori: 'Bebek / Unggas', beratKemasan: 50, isActive: true, urutan: 11, keterangan: 'Pakan unggas bebek petelur / pedaging' },
+  { id: 'pakan-12', kode: 'ABS', nama: 'ABS', kategori: 'Spesial Formula', beratKemasan: 50, isActive: true, urutan: 12, keterangan: 'Pakan spesifikasi khusus GBJ' },
+  { id: 'pakan-13', kode: 'SBDOC', nama: 'SB DOC', kategori: 'DOC Petelur', beratKemasan: 50, isActive: true, urutan: 13, keterangan: 'Pakan ayam petelur hari pertama' },
+  { id: 'pakan-14', kode: 'BR1', nama: 'BR1', kategori: 'Broiler Pre-Starter', beratKemasan: 50, isActive: true, urutan: 14, keterangan: 'Pakan crumble starter pedaging' },
+  { id: 'pakan-15', kode: 'BR1M', nama: 'BR1M', kategori: 'Broiler Mash', beratKemasan: 50, isActive: true, urutan: 15, keterangan: 'Pakan tepung mash starter' },
+  { id: 'pakan-16', kode: 'BR11', nama: 'BR11', kategori: 'Broiler Pellet', beratKemasan: 50, isActive: true, urutan: 16, keterangan: 'Pakan pelet pedaging siap panen' },
 ];
+
+export const initialFeedTypes = defaultMasterFeedTypes.map((f) => f.nama);
 
 export const sampleJapfaReportItems: FeedItemLeak[] = [
   { id: '1', no: 1, jenisPakan: 'Parli', stakAwal: 0, bocorForklift: 2, bocorPallet: 17, bocorProduksi: 0, totalBocor: 19, totalJahit: 19, gantiKarung: 19, tidakGantiKarung: 0, sisaAkhir: 0, keterangan: '' },
