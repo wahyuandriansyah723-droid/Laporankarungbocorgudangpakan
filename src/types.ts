@@ -70,6 +70,9 @@ export interface PetugasReport {
   items: FeedItemLeak[];
   catatanPetugas?: string;
   createdAt: string;
+  updatedAtStr?: string;
+  lastModifiedByClientId?: string;
+  lastModifiedDevice?: string; // 'HP / Smartphone' | 'Komputer / Laptop' | 'Tablet'
 }
 
 export interface PenanggungJawabProfile {

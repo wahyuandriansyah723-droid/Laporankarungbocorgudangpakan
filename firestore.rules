@@ -30,5 +30,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isValidId(logId);
     }
+
+    // Connection test rule
+    match /test/{docId} {
+      allow read, write: if true;
+    }
   }
 }

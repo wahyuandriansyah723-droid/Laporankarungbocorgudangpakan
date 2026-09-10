@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { connectionManager, TelemetryState } from '../firebase/connectionManager';
+import { getDeviceTypeLabel } from '../firebase/firestoreService';
 import { Wifi, WifiOff, RefreshCw, AlertTriangle, Database } from 'lucide-react';
 
 interface ConnectionStatusBadgeProps {
@@ -8,6 +9,7 @@ interface ConnectionStatusBadgeProps {
 
 export const ConnectionStatusBadge: React.FC<ConnectionStatusBadgeProps> = ({ onOpenMonitor }) => {
   const [telemetry, setTelemetry] = useState<TelemetryState>(connectionManager.getState());
+  const deviceLabel = getDeviceTypeLabel();
 
   useEffect(() => {
     const unsub = connectionManager.subscribe((state) => {
@@ -43,7 +45,7 @@ export const ConnectionStatusBadge: React.FC<ConnectionStatusBadgeProps> = ({ on
         dot: 'bg-blue-500 animate-ping',
         icon: RefreshCw,
         text: 'Menyinkronkan...',
-        subtext: 'Mengirimkan pembaruan ke Cloud...',
+        subtext: 'Mengirimkan pembaruan ke Cloud Firestore...',
       };
     }
 
@@ -51,8 +53,8 @@ export const ConnectionStatusBadge: React.FC<ConnectionStatusBadgeProps> = ({ on
       bg: 'bg-emerald-50 text-emerald-800 border-emerald-300',
       dot: 'bg-emerald-500',
       icon: Wifi,
-      text: 'Online (Tersinkron)',
-      subtext: `Reads: ${telemetry.readsCount} | Writes: ${telemetry.writesCount}`,
+      text: 'Real-Time Sync (Live)',
+      subtext: `Sinkron ke HP, Komputer & Laptop. Perangkat Anda: ${deviceLabel} | R:${telemetry.readsCount} W:${telemetry.writesCount}`,
     };
   };
 
@@ -71,8 +73,8 @@ export const ConnectionStatusBadge: React.FC<ConnectionStatusBadgeProps> = ({ on
       </span>
       <Icon className={`w-3 h-3 ${telemetry.connectionStatus === 'syncing' ? 'animate-spin' : ''}`} />
       <span className="whitespace-nowrap">{badge.text}</span>
-      <span className="text-[9px] opacity-75 font-normal hidden lg:inline border-l border-current pl-1.5 ml-0.5">
-        R:{telemetry.readsCount} W:{telemetry.writesCount}
+      <span className="text-[9px] opacity-75 font-normal hidden sm:inline border-l border-current pl-1.5 ml-0.5">
+        HP &bull; PC &bull; Laptop
       </span>
     </div>
   );

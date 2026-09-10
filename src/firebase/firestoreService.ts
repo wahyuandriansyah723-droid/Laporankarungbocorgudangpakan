@@ -4,6 +4,7 @@ import {
   setDoc,
   getDoc,
   getDocs,
+  getDocFromServer,
   onSnapshot,
   query,
   limit,
@@ -19,6 +20,64 @@ import { connectionManager } from './connectionManager';
 import { cacheService } from './cacheService';
 import { MonthReport, PetugasReport, LeakageRecord, WarehouseSettings } from '../types';
 import { emptyMonthReports, defaultSettings } from '../data/initialData';
+
+// Generate a unique client identifier for this tab/device session to track multi-device real-time sync
+export const currentClientId: string =
+  typeof window !== 'undefined'
+    ? (() => {
+        let id = sessionStorage.getItem('japfa_client_id');
+        if (!id) {
+          id = `client_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          try {
+            sessionStorage.setItem('japfa_client_id', id);
+          } catch (e) {
+            // Ignore storage restrictions
+          }
+        }
+        return id;
+      })()
+    : 'server_client';
+
+export function getDeviceTypeLabel(): string {
+  if (typeof navigator === 'undefined') return 'Komputer / Laptop';
+  const ua = navigator.userAgent;
+  if (/iPad|Tablet/i.test(ua)) return 'Tablet';
+  if (/Mobi|Android|iPhone|iPod/i.test(ua)) return 'HP (Smartphone)';
+  return 'Komputer / Laptop';
+}
+
+// Cross-tab broadcast channel for instantaneous zero-latency local synchronization across multiple windows/tabs
+let syncBroadcastChannel: BroadcastChannel | null = null;
+if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+  try {
+    syncBroadcastChannel = new BroadcastChannel('japfa_karung_bocor_sync');
+  } catch (e) {
+    console.warn('[BroadcastChannel] Not supported or restricted:', e);
+  }
+}
+
+export function broadcastLocalUpdate(type: 'petugas' | 'monthly' | 'settings' | 'logs', data: any) {
+  if (syncBroadcastChannel) {
+    try {
+      syncBroadcastChannel.postMessage({ type, data, clientId: currentClientId });
+    } catch (e) {
+      console.warn('[BroadcastChannel] Failed to post message:', e);
+    }
+  }
+}
+
+export function subscribeToBroadcastChannel(callback: (msg: { type: string; data: any; clientId: string }) => void): () => void {
+  if (!syncBroadcastChannel) return () => {};
+  const handler = (event: MessageEvent) => {
+    if (event.data && event.data.clientId !== currentClientId) {
+      callback(event.data);
+    }
+  };
+  syncBroadcastChannel.addEventListener('message', handler);
+  return () => {
+    syncBroadcastChannel?.removeEventListener('message', handler);
+  };
+}
 
 // Operation types for standard error handling
 export enum OperationType {
@@ -338,29 +397,118 @@ class FirestoreService {
   }
 
   /**
-   * SAVE PETUGAS REPORT (Single Document Write)
+   * SAVE PETUGAS REPORT (Single Document Write with optional debounce)
+   * Real-time multi-device sync to Cloud Firestore and BroadcastChannel.
    */
-  public async savePetugasReport(report: PetugasReport): Promise<void> {
+  public async savePetugasReport(report: PetugasReport, debounceMs: number = 0): Promise<void> {
+    const docId = report.id || `petugas_${report.tanggalStr}`;
+    const timerKey = `write_petugas_${docId}`;
+
+    // Instant local broadcast to other tabs on the same computer
+    broadcastLocalUpdate('petugas', { ...report, id: docId });
+
+    if (writeDebounceTimers.has(timerKey)) {
+      clearTimeout(writeDebounceTimers.get(timerKey));
+      writeDebounceTimers.delete(timerKey);
+    }
+
+    const doWrite = async () => {
+      if (!isFirebaseConfigured || !db || !connectionManager.shouldAllowCloudRequest()) {
+        return;
+      }
+
+      try {
+        connectionManager.setSyncing(true);
+        const docRef = doc(db, 'petugas_reports', docId);
+        await connectionManager.executeWithBackoff(async () => {
+          const payload = sanitizeForFirestore({
+            ...report,
+            id: docId,
+            serverUpdatedAt: serverTimestamp(),
+            updatedAtStr: new Date().toISOString(),
+            lastModifiedByClientId: currentClientId,
+            lastModifiedDevice: getDeviceTypeLabel(),
+          });
+          await setDoc(docRef, payload);
+          connectionManager.incrementWrite(1);
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `petugas_reports/${docId}`);
+      } finally {
+        connectionManager.setSyncing(false);
+      }
+    };
+
+    if (debounceMs <= 0) {
+      return doWrite();
+    }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(async () => {
+        writeDebounceTimers.delete(timerKey);
+        await doWrite();
+        resolve();
+      }, debounceMs);
+
+      writeDebounceTimers.set(timerKey, timer);
+    });
+  }
+
+  /**
+   * SUBSCRIBE TO A SINGLE PETUGAS REPORT (Active Date Sheet)
+   * Direct real-time binding for whichever report date is actively open on the screen.
+   */
+  public subscribeSinglePetugasReport(
+    reportId: string,
+    onUpdate: (report: PetugasReport | null) => void,
+    onError?: (err: any) => void
+  ): () => void {
+    const listenerKey = `petugas_report_doc_${reportId}`;
+
     if (!isFirebaseConfigured || !db || !connectionManager.shouldAllowCloudRequest()) {
-      return;
+      return () => {};
+    }
+
+    if (activeListenersMap.has(listenerKey)) {
+      const existingUnsub = activeListenersMap.get(listenerKey);
+      if (existingUnsub) existingUnsub();
+      connectionManager.unregisterListener('firestore');
+      activeListenersMap.delete(listenerKey);
     }
 
     try {
-      connectionManager.setSyncing(true);
-      const docRef = doc(db, 'petugas_reports', report.id);
-      await connectionManager.executeWithBackoff(async () => {
-        const payload = sanitizeForFirestore({
-          ...report,
-          serverUpdatedAt: serverTimestamp(),
-          updatedAtStr: new Date().toISOString(),
-        });
-        await setDoc(docRef, payload);
-        connectionManager.incrementWrite(1);
-      });
+      const docRef = doc(db, 'petugas_reports', reportId);
+      connectionManager.registerListener('firestore');
+
+      const unsubscribe = onSnapshot(
+        docRef,
+        (docSnap) => {
+          connectionManager.incrementRead(1);
+          connectionManager.setSyncing(false);
+
+          if (docSnap.exists()) {
+            const data = docSnap.data() as PetugasReport;
+            onUpdate({ ...data, id: docSnap.id });
+          } else {
+            onUpdate(null);
+          }
+        },
+        (err) => {
+          handleFirestoreError(err, OperationType.GET, `petugas_reports/${reportId}`);
+          if (onError) onError(err);
+        }
+      );
+
+      activeListenersMap.set(listenerKey, unsubscribe);
+
+      return () => {
+        unsubscribe();
+        connectionManager.unregisterListener('firestore');
+        activeListenersMap.delete(listenerKey);
+      };
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `petugas_reports/${report.id}`);
-    } finally {
-      connectionManager.setSyncing(false);
+      handleFirestoreError(err, OperationType.GET, `petugas_reports/${reportId}`);
+      return () => {};
     }
   }
 
@@ -539,3 +687,22 @@ class FirestoreService {
 }
 
 export const firestoreService = new FirestoreService();
+
+/**
+ * Validate Connection to Firestore at boot as per Firebase Skill guidelines
+ */
+export async function testConnection(): Promise<boolean> {
+  if (!isFirebaseConfigured || !db) return false;
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    console.info('[Firestore] Live connection verified successfully.');
+    return true;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('[Firestore] Please check your Firebase configuration.');
+    }
+    return false;
+  }
+}
+// Initial boot connection test
+testConnection().catch(() => {});

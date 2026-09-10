@@ -22,13 +22,17 @@ import {
   Download,
   RefreshCw,
   Layers,
+  Smartphone,
+  Monitor,
+  Laptop,
+  Wifi,
 } from 'lucide-react';
 import { PetugasReport, FeedItemLeak, LeakageRecord, WarehouseSettings, MasterJenisPakan } from '../types';
 import { defaultPetugasReport, sampleJapfaReportItems, initialFeedTypes, defaultMasterFeedTypes } from '../data/samplePetugasReport';
 import { isIndonesianRedDay } from '../data/initialData';
 import { formatNumberIndonesian } from '../utils/calculations';
 import { exportPetugasReportToExcel, importPetugasReportFromExcel } from '../utils/excelExport';
-import { firestoreService } from '../firebase/firestoreService';
+import { firestoreService, currentClientId, getDeviceTypeLabel, subscribeToBroadcastChannel } from '../firebase/firestoreService';
 import { cacheService } from '../firebase/cacheService';
 import { MasterPakanModal } from './MasterPakanModal';
 import {
@@ -92,13 +96,21 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
   });
 
   const [notification, setNotification] = useState<string | null>(null);
+  const [remoteSyncNotice, setRemoteSyncNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>(() =>
     new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   );
 
-  // Synchronize Petugas reports from cloud Firestore & local cache across devices in real-time
+  const reportRef = useRef<PetugasReport>(report);
+  useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
+  const activeReportId = report.id || `petugas_${report.tanggalStr}`;
+
+  // 1. Synchronize all Petugas reports from cloud Firestore & local cache across devices in real-time
   useEffect(() => {
     cacheService.get<PetugasReport[]>('japfa_petugas_history', [defaultPetugasReport]).then((cached) => {
       if (cached && cached.length > 0) {
@@ -109,11 +121,100 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     const unsub = firestoreService.subscribePetugasReports((cloudReports) => {
       if (cloudReports && cloudReports.length > 0) {
         setReportHistory(cloudReports);
+
+        // Check if the currently active date was updated remotely by another device (HP, PC, laptop)
+        const currentActive = reportRef.current;
+        const matchingDoc = cloudReports.find(
+          (c) =>
+            (c.id === currentActive.id || c.tanggalStr === currentActive.tanggalStr) &&
+            c.lastModifiedByClientId &&
+            c.lastModifiedByClientId !== currentClientId
+        );
+
+        if (matchingDoc) {
+          const isUserTyping =
+            typeof document !== 'undefined' &&
+            document.activeElement &&
+            document.activeElement.tagName === 'INPUT';
+
+          if (!isUserTyping) {
+            setReport(matchingDoc);
+            localStorage.setItem('japfa_petugas_report', JSON.stringify(matchingDoc));
+            setLastSyncTime(
+              new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            );
+            setRemoteSyncNotice(`⚡ Pembaruan otomatis diterima dari ${matchingDoc.lastModifiedDevice || 'perangkat lain'}`);
+            setTimeout(() => setRemoteSyncNotice(null), 4000);
+          }
+        }
       }
     });
 
     return () => {
       unsub();
+    };
+  }, []);
+
+  // 2. Direct real-time document listener specifically for the active date sheet
+  useEffect(() => {
+    if (!activeReportId) return;
+
+    const unsubDoc = firestoreService.subscribeSinglePetugasReport(activeReportId, (cloudReport) => {
+      if (!cloudReport) return;
+
+      // Only update if authored by another device/session
+      if (cloudReport.lastModifiedByClientId && cloudReport.lastModifiedByClientId !== currentClientId) {
+        const isUserTyping =
+          typeof document !== 'undefined' &&
+          document.activeElement &&
+          document.activeElement.tagName === 'INPUT';
+
+        if (!isUserTyping) {
+          setReport(cloudReport);
+          localStorage.setItem('japfa_petugas_report', JSON.stringify(cloudReport));
+          setLastSyncTime(
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          );
+          setRemoteSyncNotice(
+            `⚡ Data diperbarui real-time dari ${cloudReport.lastModifiedDevice || 'perangkat lain'} (${cloudReport.tanggalFormatted || cloudReport.tanggalStr})`
+          );
+          setTimeout(() => setRemoteSyncNotice(null), 4000);
+        }
+      }
+    });
+
+    return () => {
+      unsubDoc();
+    };
+  }, [activeReportId]);
+
+  // 3. Local cross-tab broadcast listener (0ms instant sync for multiple browser tabs/windows on the same computer)
+  useEffect(() => {
+    const unsubBroadcast = subscribeToBroadcastChannel((msg) => {
+      if (msg.type === 'petugas' && msg.data) {
+        const incoming = msg.data as PetugasReport;
+        const currentActive = reportRef.current;
+        if (incoming.id === currentActive.id || incoming.tanggalStr === currentActive.tanggalStr) {
+          const isUserTyping =
+            typeof document !== 'undefined' &&
+            document.activeElement &&
+            document.activeElement.tagName === 'INPUT';
+
+          if (!isUserTyping) {
+            setReport(incoming);
+            localStorage.setItem('japfa_petugas_report', JSON.stringify(incoming));
+            setLastSyncTime(
+              new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            );
+            setRemoteSyncNotice('⚡ Pembaruan instan disinkronkan dari tab lain');
+            setTimeout(() => setRemoteSyncNotice(null), 3000);
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubBroadcast();
     };
   }, []);
 
@@ -504,11 +605,43 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     showToast(`Penanggung Jawab (Dibuat: ${report.dibuatOleh}, Disetujui: ${report.disetujuiOleh}, Diketahui: ${report.diketahuiOleh}) disimpan sebagai default untuk bulan ${parts[1]}/${parts[0]}!`);
   };
 
-  // Sync current report to localStorage
-  const updateReport = (newReport: PetugasReport) => {
-    setReport(newReport);
-    localStorage.setItem('japfa_petugas_report', JSON.stringify(newReport));
+  // Sync current report to state, localStorage & Cloud Firestore (with auto-sync across all devices)
+  const updateReport = (newReport: PetugasReport, autoSyncToCloud: boolean = true) => {
+    const enrichedReport: PetugasReport = {
+      ...newReport,
+      updatedAtStr: new Date().toISOString(),
+      lastModifiedByClientId: currentClientId,
+      lastModifiedDevice: getDeviceTypeLabel(),
+    };
+
+    setReport(enrichedReport);
+    reportRef.current = enrichedReport;
+    localStorage.setItem('japfa_petugas_report', JSON.stringify(enrichedReport));
     setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+    if (autoSyncToCloud) {
+      // 1. Debounced save to Firestore (600ms) - syncs to all phones, PCs, and laptops
+      firestoreService.savePetugasReport(enrichedReport, 600);
+
+      // 2. Also update monthly grand totals so Main Table (Excel) updates in real-time
+      const parts = enrichedReport.tanggalStr.split('-');
+      const mIdx = parts[1] ? parseInt(parts[1], 10) : 1;
+      const dNum = parts[2] ? parseInt(parts[2], 10) : 1;
+      if (onSyncToMainReport) {
+        const grandForklift = enrichedReport.items.reduce((sum, i) => sum + (i.bocorForklift || 0), 0);
+        const grandPallet = enrichedReport.items.reduce((sum, i) => sum + (i.bocorPallet || 0), 0);
+        const grandProduksi = enrichedReport.items.reduce((sum, i) => sum + (i.bocorProduksi || 0), 0);
+        onSyncToMainReport(
+          mIdx,
+          dNum,
+          grandForklift,
+          grandPallet,
+          grandProduksi,
+          undefined,
+          enrichedReport.isRedDay
+        );
+      }
+    }
   };
 
   // Show Toast
@@ -736,8 +869,8 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
     const explicitSum = finalReport.items.reduce((sum, i) => sum + (i.totalBocor || 0), 0);
     const grandTotalBocor = explicitSum > 0 ? explicitSum : sumCalculated;
 
-    // Save report to Firestore collection 'petugas_reports'
-    await firestoreService.savePetugasReport(finalReport);
+    // Save report to Firestore collection 'petugas_reports' with immediate write (0ms debounce)
+    await firestoreService.savePetugasReport(finalReport, 0);
 
     // Sync to main monthly report and log
     const parts = finalReport.tanggalStr.split('-');
@@ -917,28 +1050,62 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Realtime Excel & Log Sync Status Banner (Print Hidden) */}
-      <div className="bg-emerald-50 border border-emerald-200/80 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-900 font-medium print:hidden">
-        <div className="flex items-center gap-2">
+      {/* Realtime Multi-Device Sync Status Banner (Print Hidden) */}
+      <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-300/90 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-950 font-medium shadow-2xs print:hidden">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
           </span>
-          <span className="font-bold text-emerald-950">Integrasi Realtime Laporan Excel Aktif</span>
-          <span className="text-emerald-700 font-normal hidden md:inline">&bull; Data tersinkron otomatis ke Laporan Rekap Bulanan</span>
+          <div className="flex items-center gap-1.5 font-bold text-emerald-950">
+            <Wifi className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Sinkronisasi Real-Time Multi-Device Aktif</span>
+          </div>
+          <span className="text-emerald-700 font-normal hidden lg:inline">&bull;</span>
+          <span className="text-emerald-800 text-[11px] hidden sm:inline">
+            Terhubung live ke semua pengguna (HP, Komputer & Laptop)
+          </span>
+
+          {/* Current Device Badge */}
+          <span className="inline-flex items-center gap-1 bg-white/90 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-300">
+            {getDeviceTypeLabel().includes('HP') ? (
+              <Smartphone className="w-3 h-3 text-emerald-600" />
+            ) : getDeviceTypeLabel().includes('Laptop') ? (
+              <Laptop className="w-3 h-3 text-emerald-600" />
+            ) : (
+              <Monitor className="w-3 h-3 text-emerald-600" />
+            )}
+            <span>Perangkat: {getDeviceTypeLabel()}</span>
+          </span>
+
+          {/* Remote modification source if available */}
+          {report.lastModifiedDevice && (
+            <span className="text-[10px] text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded border border-emerald-200 hidden md:inline">
+              Diedit via: <strong className="text-emerald-900">{report.lastModifiedDevice}</strong>
+            </span>
+          )}
+
           {onNavigateToMainTable && (
             <button
               onClick={onNavigateToMainTable}
-              className="ml-2 flex items-center gap-1 font-bold text-emerald-800 hover:text-emerald-950 underline cursor-pointer bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-300"
+              className="ml-1 flex items-center gap-1 font-bold text-emerald-900 hover:text-emerald-950 underline cursor-pointer bg-white/90 hover:bg-emerald-100 px-2.5 py-0.5 rounded-md border border-emerald-300 text-[11px] transition-colors"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Buka Tampilan Laporan Excel Utama &rarr;</span>
+              <span>Lihat Rekap Excel Bulanan &rarr;</span>
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 font-semibold bg-emerald-100 px-2.5 py-1 rounded-md border border-emerald-200">
-          <Clock className="w-3.5 h-3.5 text-emerald-700" />
-          <span>Update Terakhir: {lastSyncTime}</span>
+
+        <div className="flex items-center gap-2">
+          {remoteSyncNotice && (
+            <span className="bg-emerald-600 text-white font-bold text-[11px] px-2.5 py-0.5 rounded-full animate-pulse flex items-center gap-1">
+              <span>{remoteSyncNotice}</span>
+            </span>
+          )}
+          <div className="flex items-center gap-1 text-[11px] text-emerald-900 font-semibold bg-white/90 px-2.5 py-1 rounded-md border border-emerald-300">
+            <Clock className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Update: {lastSyncTime}</span>
+          </div>
         </div>
       </div>
 
