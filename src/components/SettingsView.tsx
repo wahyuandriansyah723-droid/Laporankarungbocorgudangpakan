@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   Plus,
   Layers,
+  Search,
 } from 'lucide-react';
 import { formatReportDate } from '../utils/calculations';
 import {
@@ -142,7 +143,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isDeleteDateModalOpen, setIsDeleteDateModalOpen] = useState(false);
   const [isDeleteSignatoriesModalOpen, setIsDeleteSignatoriesModalOpen] = useState(false);
   
-  // Profile Editor Modal
+  // Profile Editor & Management State
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<PenanggungJawabProfile | null>(null);
   const [profileFormNama, setProfileFormNama] = useState('');
@@ -150,6 +151,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [profileFormPeran, setProfileFormPeran] = useState<'dibuat' | 'disetujui' | 'diketahui' | 'umum'>('dibuat');
   const [profileFormNik, setProfileFormNik] = useState('');
   const [profileFormDivisi, setProfileFormDivisi] = useState('');
+  const [profileFormError, setProfileFormError] = useState<string | null>(null);
+
+  // In-app Delete & Reset Confirmation Modals (Replaces blocked window.confirm)
+  const [profileToDelete, setProfileToDelete] = useState<PenanggungJawabProfile | null>(null);
+  const [isResetProfilesModalOpen, setIsResetProfilesModalOpen] = useState(false);
+
+  // Filter & Search states for Card 3 Profile list
+  const [searchProfilQuery, setSearchProfilQuery] = useState('');
+  const [filterProfilRole, setFilterProfilRole] = useState<'all' | 'dibuat' | 'disetujui' | 'diketahui' | 'umum'>('all');
 
   // Custom Saved System Names List in LocalStorage
   const [savedNamesList, setSavedNamesList] = useState<Array<{ id: string; nama: string; sub: string }>>(() => {
@@ -415,6 +425,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setProfileFormPeran(defaultPeran);
     setProfileFormNik('');
     setProfileFormDivisi('');
+    setProfileFormError(null);
     setIsProfileModalOpen(true);
   };
 
@@ -425,19 +436,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setProfileFormPeran(p.peran);
     setProfileFormNik(p.nik || '');
     setProfileFormDivisi(p.divisi || '');
+    setProfileFormError(null);
     setIsProfileModalOpen(true);
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!profileFormNama.trim()) {
-      alert('Nama penanggung jawab tidak boleh kosong.');
+      setProfileFormError('Nama lengkap penanggung jawab tidak boleh kosong.');
       return;
     }
 
     let updatedList: PenanggungJawabProfile[];
     if (editingProfile) {
-      // Edit existing
+      // Edit existing profile
       updatedList = profilList.map((p) =>
         p.id === editingProfile.id
           ? {
@@ -451,7 +463,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           : p
       );
     } else {
-      // Add new
+      // Add new profile
       const newProfile: PenanggungJawabProfile = {
         id: 'prof_' + Date.now(),
         nama: profileFormNama.trim(),
@@ -465,40 +477,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     setProfilList(updatedList);
     setIsProfileModalOpen(false);
+    setProfileFormError(null);
 
     const newSettings = buildCombinedSettings({
       daftarProfilPenanggungJawab: updatedList,
     });
     onSaveSettings(newSettings);
     setSavedMsg({
-      text: `Profil penanggung jawab "${profileFormNama.trim()}" berhasil disimpan!`,
+      text: editingProfile
+        ? `Profil penanggung jawab "${profileFormNama.trim()}" berhasil diperbarui!`
+        : `Profil penanggung jawab "${profileFormNama.trim()}" berhasil ditambahkan!`,
       type: 'success',
     });
     setTimeout(() => setSavedMsg(null), 3000);
   };
 
-  const handleDeleteProfile = (id: string, nama: string) => {
-    if (!window.confirm(`Hapus profil "${nama}" dari daftar penanggung jawab tersimpan?`)) return;
-    const updatedList = profilList.filter((p) => p.id !== id);
+  // In-app Confirm Delete (Replaces blocked window.confirm)
+  const handleConfirmDeleteProfile = () => {
+    if (!profileToDelete) return;
+    const targetName = profileToDelete.nama;
+    const updatedList = profilList.filter((p) => p.id !== profileToDelete.id);
     setProfilList(updatedList);
     const newSettings = buildCombinedSettings({
       daftarProfilPenanggungJawab: updatedList,
     });
     onSaveSettings(newSettings);
+    setProfileToDelete(null);
     setSavedMsg({
-      text: `Profil "${nama}" berhasil dihapus dari daftar.`,
+      text: `Profil penanggung jawab "${targetName}" berhasil dihapus dari sistem.`,
       type: 'danger',
     });
     setTimeout(() => setSavedMsg(null), 3000);
   };
 
-  const handleResetProfilesList = () => {
-    if (!window.confirm('Pulihkan daftar profil penanggung jawab ke daftar standar pabrik?')) return;
+  // In-app Confirm Reset to Default (Replaces blocked window.confirm)
+  const handleConfirmResetProfilesList = () => {
     setProfilList(defaultProfilPenanggungJawab);
     const newSettings = buildCombinedSettings({
       daftarProfilPenanggungJawab: defaultProfilPenanggungJawab,
     });
     onSaveSettings(newSettings);
+    setIsResetProfilesModalOpen(false);
     setSavedMsg({
       text: 'Daftar profil penanggung jawab berhasil dipulihkan ke default pabrik!',
       type: 'success',
@@ -1321,9 +1340,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleResetProfilesList}
+              onClick={() => setIsResetProfilesModalOpen(true)}
               className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
-              title="Pulihkan daftar staf ke default"
+              title="Pulihkan daftar staf ke default pabrik"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Default</span>
@@ -1340,94 +1359,195 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {profilList.map((prof) => (
-              <div
-                key={prof.id}
-                className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 transition-all flex flex-col justify-between space-y-3 group shadow-2xs"
+        {/* Filter & Search Bar */}
+        <div className="px-6 py-3 bg-slate-50/70 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Cari nama, jabatan, NIK, atau divisi..."
+              value={searchProfilQuery}
+              onChange={(e) => setSearchProfilQuery(e.target.value)}
+              className="w-full pl-8 pr-8 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-600"
+            />
+            {searchProfilQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchProfilQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-extrabold text-xs text-slate-900">{prof.nama}</span>
-                      <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                          prof.peran === 'dibuat'
-                            ? 'bg-blue-100 text-blue-800'
-                            : prof.peran === 'disetujui'
-                            ? 'bg-amber-100 text-amber-800'
-                            : prof.peran === 'diketahui'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-slate-200 text-slate-800'
-                        }`}
-                      >
-                        {prof.peran === 'dibuat'
-                          ? 'Dibuat Oleh'
-                          : prof.peran === 'disetujui'
-                          ? 'Disetujui Oleh'
-                          : prof.peran === 'diketahui'
-                          ? 'Diketahui Oleh'
-                          : 'Umum'}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 font-medium mt-0.5">
-                      {prof.jabatan}
-                      {prof.divisi && ` \u2022 ${prof.divisi}`}
-                    </p>
-                    {prof.nik && (
-                      <span className="text-[10px] text-slate-400 font-mono block">NIK: {prof.nik}</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditProfile(prof)}
-                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                      title="Edit data penanggung jawab"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteProfile(prof.id, prof.nama)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                      title="Hapus dari daftar"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Quick Assign Buttons */}
-                <div className="pt-2 border-t border-slate-200/80 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[10px] text-slate-400 font-medium">Gunakan Sebagai:</span>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyProfileToSignatory(prof, 'dibuat')}
-                    className="px-2 py-0.5 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded transition-colors"
-                  >
-                    Dibuat
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyProfileToSignatory(prof, 'disetujui')}
-                    className="px-2 py-0.5 text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded transition-colors"
-                  >
-                    Disetujui
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyProfileToSignatory(prof, 'diketahui')}
-                    className="px-2 py-0.5 text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded transition-colors"
-                  >
-                    Diketahui
-                  </button>
-                </div>
-              </div>
-            ))}
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
+
+          <div className="flex items-center gap-1 overflow-x-auto text-[11px]">
+            <button
+              type="button"
+              onClick={() => setFilterProfilRole('all')}
+              className={`px-2.5 py-1 rounded-md font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                filterProfilRole === 'all'
+                  ? 'bg-purple-600 text-white shadow-2xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              Semua ({profilList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterProfilRole('dibuat')}
+              className={`px-2.5 py-1 rounded-md font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                filterProfilRole === 'dibuat'
+                  ? 'bg-blue-600 text-white shadow-2xs'
+                  : 'bg-blue-50 text-blue-800 hover:bg-blue-100 border border-blue-200'
+              }`}
+            >
+              Dibuat ({profilList.filter((p) => p.peran === 'dibuat').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterProfilRole('disetujui')}
+              className={`px-2.5 py-1 rounded-md font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                filterProfilRole === 'disetujui'
+                  ? 'bg-amber-600 text-white shadow-2xs'
+                  : 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-200'
+              }`}
+            >
+              Disetujui ({profilList.filter((p) => p.peran === 'disetujui').length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterProfilRole('diketahui')}
+              className={`px-2.5 py-1 rounded-md font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                filterProfilRole === 'diketahui'
+                  ? 'bg-emerald-600 text-white shadow-2xs'
+                  : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200'
+              }`}
+            >
+              Diketahui ({profilList.filter((p) => p.peran === 'diketahui').length})
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6">
+          {profilList.filter((p) => {
+            const matchesSearch =
+              p.nama.toLowerCase().includes(searchProfilQuery.toLowerCase()) ||
+              (p.jabatan && p.jabatan.toLowerCase().includes(searchProfilQuery.toLowerCase())) ||
+              (p.nik && p.nik.toLowerCase().includes(searchProfilQuery.toLowerCase())) ||
+              (p.divisi && p.divisi.toLowerCase().includes(searchProfilQuery.toLowerCase()));
+            const matchesRole = filterProfilRole === 'all' || p.peran === filterProfilRole;
+            return matchesSearch && matchesRole;
+          }).length === 0 ? (
+            <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200">
+              <Users className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+              <p className="text-xs font-bold text-slate-700">Tidak ada profil penanggung jawab yang cocok.</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Coba ubah kata kunci pencarian atau tambah profil baru.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {profilList
+                .filter((p) => {
+                  const matchesSearch =
+                    p.nama.toLowerCase().includes(searchProfilQuery.toLowerCase()) ||
+                    (p.jabatan && p.jabatan.toLowerCase().includes(searchProfilQuery.toLowerCase())) ||
+                    (p.nik && p.nik.toLowerCase().includes(searchProfilQuery.toLowerCase())) ||
+                    (p.divisi && p.divisi.toLowerCase().includes(searchProfilQuery.toLowerCase()));
+                  const matchesRole = filterProfilRole === 'all' || p.peran === filterProfilRole;
+                  return matchesSearch && matchesRole;
+                })
+                .map((prof) => (
+                  <div
+                    key={prof.id}
+                    className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 transition-all flex flex-col justify-between space-y-3 group shadow-2xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-extrabold text-xs text-slate-900 truncate">{prof.nama}</span>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                              prof.peran === 'dibuat'
+                                ? 'bg-blue-100 text-blue-800'
+                                : prof.peran === 'disetujui'
+                                ? 'bg-amber-100 text-amber-800'
+                                : prof.peran === 'diketahui'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-slate-200 text-slate-800'
+                            }`}
+                          >
+                            {prof.peran === 'dibuat'
+                              ? 'Dibuat Oleh'
+                              : prof.peran === 'disetujui'
+                              ? 'Disetujui Oleh'
+                              : prof.peran === 'diketahui'
+                              ? 'Diketahui Oleh'
+                              : 'Umum'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 font-medium mt-0.5 truncate">
+                          {prof.jabatan}
+                          {prof.divisi && ` \u2022 ${prof.divisi}`}
+                        </p>
+                        {prof.nik && (
+                          <span className="text-[10px] text-slate-400 font-mono block">NIK: {prof.nik}</span>
+                        )}
+                      </div>
+
+                      {/* ACTIVE ACTION BUTTONS: EDIT & HAPUS */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditProfile(prof)}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-900 border border-blue-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                          title="Edit data profil staf ini"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProfileToDelete(prof)}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 hover:text-red-900 border border-red-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                          title="Hapus data profil staf ini"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Quick Assign Buttons */}
+                    <div className="pt-2 border-t border-slate-200/80 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-slate-400 font-medium">Gunakan Sebagai:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyProfileToSignatory(prof, 'dibuat')}
+                        className="px-2 py-0.5 text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded transition-colors cursor-pointer"
+                      >
+                        Dibuat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyProfileToSignatory(prof, 'disetujui')}
+                        className="px-2 py-0.5 text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded transition-colors cursor-pointer"
+                      >
+                        Disetujui
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyProfileToSignatory(prof, 'diketahui')}
+                        className="px-2 py-0.5 text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded transition-colors cursor-pointer"
+                      >
+                        Diketahui
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2062,6 +2182,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-3 text-xs">
+              {profileFormError && (
+                <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 flex items-center gap-2 font-semibold">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 text-red-600" />
+                  <span>{profileFormError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
                   Nama Lengkap: <span className="text-red-500">*</span>
@@ -2154,6 +2281,121 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================== */}
+      {/* MODAL 3B: KONFIRMASI HAPUS PROFIL PENANGGUNG JAWAB         */}
+      {/* ========================================================== */}
+      {profileToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-red-100 text-red-600 rounded-xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Hapus Profil Penanggung Jawab?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Tindakan ini akan menghapus profil dari daftar tim penanggung jawab.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Nama Lengkap:</span>
+                <span className="font-extrabold text-slate-900 text-sm">{profileToDelete.nama}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Jabatan:</span>
+                <span className="font-bold text-slate-700">{profileToDelete.jabatan || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Peran:</span>
+                <span className="font-bold text-purple-700 uppercase text-[10px]">
+                  {profileToDelete.peran === 'dibuat'
+                    ? 'Dibuat Oleh'
+                    : profileToDelete.peran === 'disetujui'
+                    ? 'Disetujui Oleh'
+                    : profileToDelete.peran === 'diketahui'
+                    ? 'Diketahui Oleh'
+                    : 'Umum'}
+                </span>
+              </div>
+              {profileToDelete.nik && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">NIK:</span>
+                  <span className="font-mono text-slate-700">{profileToDelete.nik}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setProfileToDelete(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteProfile}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Hapus Profil</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================== */}
+      {/* MODAL 3C: KONFIRMASI RESET PROFIL KE STANDAR PABRIK        */}
+      {/* ========================================================== */}
+      {isResetProfilesModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-100 text-amber-600 rounded-xl">
+                <RotateCcw className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Reset Daftar Profil ke Default?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Kembalikan daftar nama penanggung jawab ke daftar standar bawaan pabrik.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 bg-amber-50 p-3 rounded-xl border border-amber-200">
+              Seluruh data profil yang telah ditambahkan atau diubah secara manual akan digantikan dengan {defaultProfilPenanggungJawab.length} profil standar pabrik.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsResetProfilesModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmResetProfilesList}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Ya, Reset ke Standar</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

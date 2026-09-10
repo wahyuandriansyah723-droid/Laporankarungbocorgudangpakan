@@ -26,15 +26,17 @@ import {
   Monitor,
   Laptop,
   Wifi,
+  Users,
 } from 'lucide-react';
-import { PetugasReport, FeedItemLeak, LeakageRecord, WarehouseSettings, MasterJenisPakan } from '../types';
+import { PetugasReport, FeedItemLeak, LeakageRecord, WarehouseSettings, MasterJenisPakan, PenanggungJawabProfile } from '../types';
 import { defaultPetugasReport, sampleJapfaReportItems, initialFeedTypes, defaultMasterFeedTypes } from '../data/samplePetugasReport';
-import { isIndonesianRedDay } from '../data/initialData';
+import { isIndonesianRedDay, defaultProfilPenanggungJawab } from '../data/initialData';
 import { formatNumberIndonesian } from '../utils/calculations';
 import { exportPetugasReportToExcel, importPetugasReportFromExcel } from '../utils/excelExport';
 import { firestoreService, currentClientId, getDeviceTypeLabel, subscribeToBroadcastChannel } from '../firebase/firestoreService';
 import { cacheService } from '../firebase/cacheService';
 import { MasterPakanModal } from './MasterPakanModal';
+import { ManageProfilTimModal } from './ManageProfilTimModal';
 import {
   BarChart,
   Bar,
@@ -289,6 +291,52 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
       diketahuiOleh: '',
     });
     setNotification('Penanggung jawab laporan dikosongkan.');
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  // Team Signatory Profiles Modal & Handlers
+  const [isManageProfilModalOpen, setIsManageProfilModalOpen] = useState(false);
+
+  const profilTimList: PenanggungJawabProfile[] = useMemo(() => {
+    if (settings.daftarProfilPenanggungJawab && settings.daftarProfilPenanggungJawab.length > 0) {
+      return settings.daftarProfilPenanggungJawab;
+    }
+    return defaultProfilPenanggungJawab;
+  }, [settings.daftarProfilPenanggungJawab]);
+
+  const handleSaveProfilTim = async (newList: PenanggungJawabProfile[]) => {
+    const updatedSettings: WarehouseSettings = {
+      ...settings,
+      daftarProfilPenanggungJawab: newList,
+    };
+    if (onUpdateSettings) {
+      onUpdateSettings(updatedSettings);
+    } else {
+      await firestoreService.saveSettings(updatedSettings);
+      await cacheService.set('karung_bocor_settings', updatedSettings);
+    }
+    setNotification('Daftar profil tim penanggung jawab berhasil diperbarui dan disinkronkan ke cloud!');
+    setTimeout(() => setNotification(null), 3500);
+  };
+
+  const handleSelectProfileForSignatory = (
+    profile: PenanggungJawabProfile,
+    role: 'dibuat' | 'disetujui' | 'diketahui'
+  ) => {
+    if (role === 'dibuat') {
+      updateReport({ ...report, dibuatOleh: profile.nama });
+    } else if (role === 'disetujui') {
+      const formatted = profile.jabatan ? `${profile.nama} (${profile.jabatan})` : profile.nama;
+      updateReport({ ...report, disetujuiOleh: formatted });
+    } else if (role === 'diketahui') {
+      const formatted = profile.jabatan ? `${profile.nama} (${profile.jabatan})` : profile.nama;
+      updateReport({ ...report, diketahuiOleh: formatted });
+    }
+    setNotification(
+      `Profil "${profile.nama}" berhasil dipilih sebagai ${
+        role === 'dibuat' ? 'Dibuat Oleh' : role === 'disetujui' ? 'Disetujui Oleh' : 'Diketahui Oleh'
+      }!`
+    );
     setTimeout(() => setNotification(null), 3000);
   };
 
@@ -1414,6 +1462,43 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
           ))}
         </datalist>
 
+        {/* Dynamic Datalists for Signatories based on profilTimList */}
+        <datalist id="worker-presets">
+          {profilTimList
+            .filter((p) => p.peran === 'dibuat' || p.peran === 'umum')
+            .map((p) => (
+              <option key={p.id} value={p.nama}>
+                {p.jabatan ? `${p.jabatan}${p.divisi ? ` - ${p.divisi}` : ''}` : 'Petugas FG WH'}
+              </option>
+            ))}
+        </datalist>
+
+        <datalist id="supervisor-presets">
+          {profilTimList
+            .filter((p) => p.peran === 'disetujui' || p.peran === 'umum')
+            .map((p) => (
+              <option
+                key={p.id}
+                value={p.jabatan ? `${p.nama} (${p.jabatan})` : p.nama}
+              >
+                {p.jabatan || 'FG WH Supervisor'}
+              </option>
+            ))}
+        </datalist>
+
+        <datalist id="head-presets">
+          {profilTimList
+            .filter((p) => p.peran === 'diketahui' || p.peran === 'umum')
+            .map((p) => (
+              <option
+                key={p.id}
+                value={p.jabatan ? `${p.nama} (${p.jabatan})` : p.nama}
+              >
+                {p.jabatan || 'Head of WH Subdept'}
+              </option>
+            ))}
+        </datalist>
+
         {/* Dedicated Save & Excel Sync Action Bar for Tabel Laporan Karung Bocor */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-amber-50 to-amber-100/70 border border-amber-300 rounded-xl p-3.5 shadow-xs print:hidden">
           <div className="flex items-center gap-3">
@@ -1740,82 +1825,175 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
         </div>
 
         {/* Paper Sheet Signatures Block */}
-        <div className="pt-6 border-t border-slate-300 grid grid-cols-1 md:grid-cols-3 gap-4 text-center text-xs">
-          {/* Box 1: Dibuat Oleh */}
-          <div className="border border-slate-400 rounded-lg p-3 bg-slate-50 flex flex-col justify-between h-40 shadow-2xs">
+        <div className="pt-6 border-t border-slate-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-3 border-b border-slate-200">
             <div>
-              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block border-b border-slate-200 pb-1">
-                DIBUAT OLEH:
-              </span>
-              <span className="text-[9px] text-slate-400 block pt-1">
-                Tgl: {report.tanggalFormatted} ({report.hari})
-              </span>
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <UserCheck className="w-4 h-4 text-purple-600" />
+                <span>Tanda Tangan & Penanggung Jawab Laporan</span>
+                <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  {profilTimList.length} Staf Terdaftar
+                </span>
+              </h4>
+              <p className="text-[11px] text-slate-500 font-normal">
+                Pilih profil staf penanggung jawab dari daftar tersimpan atau ketik manual. Anda juga dapat mengedit dan menghapus profil.
+              </p>
             </div>
 
-            <div className="my-auto pt-2">
-              <input
-                type="text"
-                list="worker-presets"
-                value={report.dibuatOleh}
-                onChange={(e) => updateReport({ ...report, dibuatOleh: e.target.value })}
-                className="w-full text-center font-bold text-slate-900 border-b-2 border-slate-700 focus:outline-none focus:border-blue-600 bg-transparent text-xs py-1"
-                placeholder="Petugas FG WH"
-              />
-              <span className="text-[10px] text-slate-500 block mt-1 font-semibold">
-                FG WH Worker
-              </span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsManageProfilModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer print:hidden hover:shadow-xs self-start sm:self-auto"
+              title="Buka panel kelola profil tim: edit, hapus, tambah, atau pulihkan profil staf"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Kelola Profil Tim (Edit / Hapus / Tambah)</span>
+            </button>
           </div>
 
-          {/* Box 2: Disetujui Oleh */}
-          <div className="border border-slate-400 rounded-lg p-3 bg-slate-50 flex flex-col justify-between h-40 shadow-2xs">
-            <div>
-              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block border-b border-slate-200 pb-1">
-                DISETUJUI OLEH:
-              </span>
-              <span className="text-[9px] text-slate-400 block pt-1">
-                Tgl: {report.tanggalFormatted} ({report.hari})
-              </span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center text-xs">
+            {/* Box 1: Dibuat Oleh */}
+            <div className="border border-slate-400 rounded-lg p-3 bg-slate-50 flex flex-col justify-between min-h-[160px] shadow-2xs">
+              <div>
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block border-b border-slate-200 pb-1">
+                  DIBUAT OLEH:
+                </span>
+                <span className="text-[9px] text-slate-400 block pt-1">
+                  Tgl: {report.tanggalFormatted} ({report.hari})
+                </span>
+              </div>
+
+              <div className="my-auto pt-2">
+                <input
+                  type="text"
+                  list="worker-presets"
+                  value={report.dibuatOleh}
+                  onChange={(e) => updateReport({ ...report, dibuatOleh: e.target.value })}
+                  className="w-full text-center font-bold text-slate-900 border-b-2 border-slate-700 focus:outline-none focus:border-blue-600 bg-transparent text-xs py-1"
+                  placeholder="Petugas FG WH"
+                />
+                <span className="text-[10px] text-slate-500 block mt-1 font-semibold">
+                  FG WH Worker
+                </span>
+              </div>
+
+              {/* Quick Select from Profil Tim */}
+              <div className="pt-2 border-t border-slate-200 print:hidden">
+                <select
+                  onChange={(e) => {
+                    const prof = profilTimList.find((p) => p.id === e.target.value);
+                    if (prof) handleSelectProfileForSignatory(prof, 'dibuat');
+                  }}
+                  value=""
+                  className="w-full text-[10px] border border-slate-300 rounded px-1.5 py-0.5 bg-white text-slate-600 font-medium focus:outline-none cursor-pointer"
+                  title="Pilih profil staf untuk bagian Dibuat Oleh"
+                >
+                  <option value="">&darr; Pilih dari Profil Tim...</option>
+                  {profilTimList
+                    .filter((p) => p.peran === 'dibuat' || p.peran === 'umum')
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nama} ({p.jabatan || 'Worker'})
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
 
-            <div className="my-auto pt-2">
-              <input
-                type="text"
-                list="supervisor-presets"
-                value={report.disetujuiOleh}
-                onChange={(e) => updateReport({ ...report, disetujuiOleh: e.target.value })}
-                className="w-full text-center font-extrabold text-slate-900 border-b-2 border-slate-700 focus:outline-none focus:border-blue-600 bg-transparent text-xs py-1"
-                placeholder="AMIN SODIK (FG WH Supervisor)"
-              />
-              <span className="text-[10px] text-slate-500 block mt-1 font-semibold">
-                FG WH Supervisor
-              </span>
-            </div>
-          </div>
+            {/* Box 2: Disetujui Oleh */}
+            <div className="border border-slate-400 rounded-lg p-3 bg-slate-50 flex flex-col justify-between min-h-[160px] shadow-2xs">
+              <div>
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block border-b border-slate-200 pb-1">
+                  DISETUJUI OLEH:
+                </span>
+                <span className="text-[9px] text-slate-400 block pt-1">
+                  Tgl: {report.tanggalFormatted} ({report.hari})
+                </span>
+              </div>
 
-          {/* Box 3: Diketahui Oleh */}
-          <div className="border border-slate-400 rounded-lg p-3 bg-slate-50 flex flex-col justify-between h-40 shadow-2xs">
-            <div>
-              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block border-b border-slate-200 pb-1">
-                DIKETAHUI OLEH:
-              </span>
-              <span className="text-[9px] text-slate-400 block pt-1">
-                Tgl: {report.tanggalFormatted} ({report.hari})
-              </span>
+              <div className="my-auto pt-2">
+                <input
+                  type="text"
+                  list="supervisor-presets"
+                  value={report.disetujuiOleh}
+                  onChange={(e) => updateReport({ ...report, disetujuiOleh: e.target.value })}
+                  className="w-full text-center font-extrabold text-slate-900 border-b-2 border-slate-700 focus:outline-none focus:border-blue-600 bg-transparent text-xs py-1"
+                  placeholder="AMIN SODIK (FG WH Supervisor)"
+                />
+                <span className="text-[10px] text-slate-500 block mt-1 font-semibold">
+                  FG WH Supervisor
+                </span>
+              </div>
+
+              {/* Quick Select from Profil Tim */}
+              <div className="pt-2 border-t border-slate-200 print:hidden">
+                <select
+                  onChange={(e) => {
+                    const prof = profilTimList.find((p) => p.id === e.target.value);
+                    if (prof) handleSelectProfileForSignatory(prof, 'disetujui');
+                  }}
+                  value=""
+                  className="w-full text-[10px] border border-slate-300 rounded px-1.5 py-0.5 bg-white text-slate-600 font-medium focus:outline-none cursor-pointer"
+                  title="Pilih profil staf untuk bagian Disetujui Oleh"
+                >
+                  <option value="">&darr; Pilih dari Profil Tim...</option>
+                  {profilTimList
+                    .filter((p) => p.peran === 'disetujui' || p.peran === 'umum')
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nama} ({p.jabatan || 'Supervisor'})
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
 
-            <div className="my-auto pt-2">
-              <input
-                type="text"
-                list="head-presets"
-                value={report.diketahuiOleh}
-                onChange={(e) => updateReport({ ...report, diketahuiOleh: e.target.value })}
-                className="w-full text-center font-extrabold text-slate-900 border-b-2 border-slate-700 focus:outline-none focus:border-blue-600 bg-transparent text-xs py-1"
-                placeholder="HERY SHAPRIANTO (Head of WH Subdept)"
-              />
-              <span className="text-[10px] text-slate-500 block mt-1 font-semibold">
-                Head of WH Subdept
-              </span>
+            {/* Box 3: Diketahui Oleh */}
+            <div className="border border-slate-400 rounded-lg p-3 bg-slate-50 flex flex-col justify-between min-h-[160px] shadow-2xs">
+              <div>
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block border-b border-slate-200 pb-1">
+                  DIKETAHUI OLEH:
+                </span>
+                <span className="text-[9px] text-slate-400 block pt-1">
+                  Tgl: {report.tanggalFormatted} ({report.hari})
+                </span>
+              </div>
+
+              <div className="my-auto pt-2">
+                <input
+                  type="text"
+                  list="head-presets"
+                  value={report.diketahuiOleh}
+                  onChange={(e) => updateReport({ ...report, diketahuiOleh: e.target.value })}
+                  className="w-full text-center font-extrabold text-slate-900 border-b-2 border-slate-700 focus:outline-none focus:border-blue-600 bg-transparent text-xs py-1"
+                  placeholder="HERY SHAPRIANTO (Head of WH Subdept)"
+                />
+                <span className="text-[10px] text-slate-500 block mt-1 font-semibold">
+                  Head of WH Subdept
+                </span>
+              </div>
+
+              {/* Quick Select from Profil Tim */}
+              <div className="pt-2 border-t border-slate-200 print:hidden">
+                <select
+                  onChange={(e) => {
+                    const prof = profilTimList.find((p) => p.id === e.target.value);
+                    if (prof) handleSelectProfileForSignatory(prof, 'diketahui');
+                  }}
+                  value=""
+                  className="w-full text-[10px] border border-slate-300 rounded px-1.5 py-0.5 bg-white text-slate-600 font-medium focus:outline-none cursor-pointer"
+                  title="Pilih profil staf untuk bagian Diketahui Oleh"
+                >
+                  <option value="">&darr; Pilih dari Profil Tim...</option>
+                  {profilTimList
+                    .filter((p) => p.peran === 'diketahui' || p.peran === 'umum')
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nama} ({p.jabatan || 'Head Dept'})
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -1868,6 +2046,15 @@ export const PetugasDashboardView: React.FC<PetugasDashboardViewProps> = ({
         masterPakanList={masterPakanList}
         onSaveMasterPakan={handleSaveMasterPakan}
         onApplyToActiveReport={handleApplyMasterToActiveReport}
+      />
+
+      {/* Manage Profil Tim Penanggung Jawab Modal */}
+      <ManageProfilTimModal
+        isOpen={isManageProfilModalOpen}
+        onClose={() => setIsManageProfilModalOpen(false)}
+        profilList={profilTimList}
+        onSaveProfiles={handleSaveProfilTim}
+        onSelectProfileForRole={handleSelectProfileForSignatory}
       />
     </div>
   );
